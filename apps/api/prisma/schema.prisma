@@ -1,0 +1,299 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+// ── Admin (backoffice) access — separate from customer Users below ───────
+
+enum AdminRole {
+  ADMIN
+  FULFILLMENT_STAFF
+}
+
+model AdminUser {
+  id           Int       @id @default(autoincrement())
+  username     String    @unique
+  passwordHash String
+  name         String
+  role         AdminRole @default(ADMIN)
+  createdAt    DateTime  @default(now())
+
+  refreshTokens AdminRefreshToken[]
+}
+
+// One row per issued refresh token, so a single session can be revoked
+// (logout) without invalidating every other device/session for the user.
+// tokenHash stores a SHA-256 hash, never the raw token.
+model AdminRefreshToken {
+  id        Int       @id @default(autoincrement())
+  tokenHash String    @unique
+  expiresAt DateTime
+  revokedAt DateTime?
+  createdAt DateTime  @default(now())
+
+  adminUserId Int
+  adminUser   AdminUser @relation(fields: [adminUserId], references: [id], onDelete: Cascade)
+
+  @@index([adminUserId])
+}
+
+// ── Customer (storefront) access ──────────────────────────────────────
+
+model User {
+  id           Int      @id @default(autoincrement())
+  email        String   @unique
+  passwordHash String
+  role         UserRole @default(CUSTOMER)
+  createdAt    DateTime @default(now())
+
+  orders Order[]
+}
+
+enum UserRole {
+  CUSTOMER
+}
+
+// ── Catalog ────────────────────────────────────────────────────────────
+
+model Category {
+  id   Int    @id @default(autoincrement())
+  name String
+  slug String @unique
+
+  products Product[]
+}
+
+// Free-form labels a product can carry in addition to its single Category —
+// many-to-many via ProductTag, so a product can carry several (e.g.
+// "summer", "bestseller") independent of its one required category.
+model Tag {
+  id   Int    @id @default(autoincrement())
+  name String
+  slug String @unique
+
+  products ProductTag[]
+}
+
+model ProductTag {
+  productId Int
+  product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+  tagId     Int
+  tag       Tag     @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([productId, tagId])
+  @@index([tagId])
+}
+
+model Product {
+  id             Int      @id @default(autoincrement())
+  title          String
+  slug           String   @unique
+  description    String?  @db.Text
+  basePriceCents Int
+  // Optional "was" price shown struck through next to basePriceCents to
+  // present a sale (e.g. compareAtPriceCents: 5000, basePriceCents: 3500 ->
+  // "$50 $35"). Null means the product isn't on sale.
+  compareAtPriceCents Int?
+  // Optional promo window for the compareAtPriceCents deal — when set, the
+  // sale is only "active" (isOnSale true, badge shown) between these two
+  // instants; both null means the sale runs indefinitely as long as
+  // compareAtPriceCents is set. Lets an admin schedule a deal in advance and
+  // have it expire on its own without a cron job (checked at read time).
+  saleStartsAt DateTime?
+  saleEndsAt   DateTime?
+  currency       String   @default("usd")
+  // Deprecated in favor of ProductImage (a product can have a gallery now),
+  // kept only so existing rows/callers that set a single imageUrl still
+  // resolve to something — new code should read images[] instead.
+  imageUrl       String?
+  metaTitle       String?
+  metaDescription String? @db.Text
+  // Manual admin ordering for the catalog list (drag-to-reorder) — lower
+  // sorts first. Defaults to 0 so existing products don't need a backfill
+  // to keep their relative order stable (falls back to createdAt).
+  sortOrder Int @default(0)
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  categoryId Int?
+  category   Category? @relation(fields: [categoryId], references: [id])
+
+  variants ProductVariant[]
+  images   ProductImage[]
+  tags     ProductTag[]
+
+  @@index([isActive])
+  @@index([categoryId])
+}
+
+// A product's image gallery — replaces the old single Product.imageUrl for
+// new writes. position controls display order; isFeatured marks the one
+// shown in list views/thumbnails (exactly one should be featured per
+// product, enforced at the service layer rather than the DB).
+model ProductImage {
+  id         Int     @id @default(autoincrement())
+  url        String
+  position   Int     @default(0)
+  isFeatured Boolean @default(false)
+
+  productId Int
+  product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@index([productId])
+}
+
+model ProductVariant {
+  id         Int    @id @default(autoincrement())
+  sku        String @unique
+  priceCents Int
+  // Flexible per-variant traits (size, color, etc.) that vary by product
+  // type — a JSON column avoids a rigid schema for every possible attribute.
+  attributes Json?
+  // Optional per-variant override image (e.g. the red variant shows a red
+  // photo) — falls back to the product's featured image when null.
+  imageUrl String?
+  // Per-variant sale — same shape/semantics as Product.compareAtPriceCents
+  // and its date window, but scoped to just this variant so a promo can
+  // target e.g. only the Bronze tint instead of every variant under the
+  // product. Independent of Product.compareAtPriceCents: either or both can
+  // be set; the product is considered "on sale" if it or any of its
+  // (visible) variants has an active deal.
+  compareAtPriceCents Int?
+  saleStartsAt        DateTime?
+  saleEndsAt          DateTime?
+  // Soft-delete for a single variant (e.g. discontinuing one color/size
+  // while keeping the rest of the product live) — same pattern as
+  // Product.isActive, never a hard delete since past OrderItems reference
+  // this row. A variant hidden here disappears from storefront reads even
+  // when the parent product is active; the admin still sees it (greyed out)
+  // so it can be reactivated or its stock reviewed.
+  isActive Boolean @default(true)
+
+  productId Int
+  product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  inventory  Inventory?
+  orderItems OrderItem[]
+
+  @@index([productId])
+}
+
+// Kept as its own table (not just a column on ProductVariant) so stock
+// reservation during checkout can be locked/updated independently of the
+// variant's descriptive data.
+model Inventory {
+  variantId        Int            @id
+  variant          ProductVariant @relation(fields: [variantId], references: [id], onDelete: Cascade)
+  stockQuantity    Int            @default(0)
+  reservedQuantity Int            @default(0)
+}
+
+// ── Orders ─────────────────────────────────────────────────────────────
+
+// Strict, unidirectional state machine — see lib/orderStateMachine.ts for
+// the allowed-transitions table. PENDING is the only entry state; every
+// other state is reached by exactly one kind of transition (payment
+// success/failure, fulfillment, delivery, cancellation/refund/return).
+enum OrderStatus {
+  PENDING
+  PAID
+  SHIPPED
+  DELIVERED
+  CANCELLED
+  REFUNDED
+  RETURNED
+}
+
+enum PaymentMethod {
+  PAY_WITH_CHECK
+  PAYPAL
+  BANK
+  CARD
+}
+
+model Order {
+  id        Int         @id @default(autoincrement())
+  reference String
+  status    OrderStatus @default(PENDING)
+  // Null until checkout completes with a chosen payment method — an order
+  // exists in PENDING before payment happens (see diagram: checkout locks
+  // prices/stock and creates a PENDING order; a webhook later confirms
+  // payment and moves it to PAID).
+  paymentMethod PaymentMethod?
+
+  subtotalCents Int
+  discountCents Int    @default(0)
+  shippingCents Int    @default(0)
+  taxCents      Int    @default(0)
+  totalCents    Int
+  currency      String @default("usd")
+
+  shippingAddress String? @db.Text
+  isNewClient     Boolean @default(false)
+  trackingNumber  String?
+
+  // Payment/idempotency — paymentAttemptCount increments on every call to
+  // POST /payments/intent for this order, and the value at call time forms
+  // half of the idempotency key (orderId-attemptCount) passed to Stripe, so
+  // a network retry of the same attempt reuses the same PaymentIntent
+  // instead of creating a duplicate charge.
+  paymentAttemptCount  Int     @default(0)
+  stripePaymentIntentId String? @unique
+
+  userId Int?
+  user   User? @relation(fields: [userId], references: [id])
+
+  items OrderItem[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([status])
+  @@index([userId])
+}
+
+model OrderItem {
+  id             Int            @id @default(autoincrement())
+  order          Order          @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  orderId        Int
+  variant        ProductVariant @relation(fields: [variantId], references: [id])
+  variantId      Int
+  quantity       Int
+  unitPriceCents Int
+
+  @@index([orderId])
+  @@index([variantId])
+}
+
+// ── Payments ───────────────────────────────────────────────────────────
+
+// Webhook replay protection — no Redis in this stack, so processed Stripe
+// event IDs are recorded here instead. A webhook whose event.id already
+// exists is ignored rather than reprocessed, since Stripe can and does
+// redeliver the same event.
+model ProcessedWebhookEvent {
+  id          String   @id // Stripe event.id
+  type        String
+  processedAt DateTime @default(now())
+}
+
+// ── Store settings ─────────────────────────────────────────────────────
+
+// Singleton row (always id: 1) for store-wide admin-configurable values —
+// the Configuration page reads/writes this. Starts with just the store
+// name (shown in the Sidebar instead of a hardcoded string); add more
+// columns here as Configuration grows rather than one-off hardcoded values
+// elsewhere in the UI.
+model StoreSettings {
+  id        Int      @id @default(1)
+  storeName String   @default("Sawo Shop")
+  // Null means "no logo uploaded" — the Sidebar falls back to a plain
+  // initial-letter box in that case rather than a broken image.
+  logoUrl   String?
+  updatedAt DateTime @updatedAt
+}
