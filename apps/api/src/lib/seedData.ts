@@ -1312,28 +1312,99 @@ async function seedBulkCustomerProfiles(bulkCustomers: { id: number }[]) {
   }
 }
 
-// One example lead — a customer who called in asking about a heater +
-// stones combo but hasn't ordered yet, demonstrating the Customer page's
-// "Cart interest" section (see cartLead.service.ts — there's no real
-// add-to-cart flow in this admin-only app, so this is staff-logged).
-async function seedCartLeadExample(customers: { id: number }[], variantsBySku: Map<string, number>) {
+// A spread of "still deciding, hasn't purchased yet" leads across several
+// customers and products — demonstrates the Customer page's "Cart
+// interest" section with real variety, not just one lonely example (see
+// cartLead.service.ts — there's no real add-to-cart flow in this
+// admin-only app, so every one of these is staff-logged, same reasoning as
+// ReturnRequest/Review). Deliberately no note text — a real staff-logged
+// lead is just "these items, this quantity," not an invented backstory.
+async function seedCartLeadExamples(customers: { id: number }[], variantsBySku: Map<string, number>) {
   const existing = await prisma.cartLead.findFirst({ where: { userId: customers[2]?.id } });
   if (existing) return;
-  if (!customers[2]) return;
 
-  const heaterSku = "HTR-INV-8KW";
-  const heaterVariantId = variantsBySku.get(heaterSku);
-  if (!heaterVariantId) return;
-
-  await prisma.cartLead.create({
-    data: {
-      userId: customers[2].id,
+  const leads: {
+    customerIndex: number;
+    loggedByName: string;
+    days: number;
+    items: { sku: string; quantity: number }[];
+  }[] = [
+    {
+      customerIndex: 2,
       loggedByName: "Fulfillment Staff",
-      note: "Called asking about the Innova digital heater — said they'd decide after checking cabin dimensions.",
-      createdAt: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000),
-      items: { create: [{ variantId: heaterVariantId, quantity: 1 }] },
+      days: 3,
+      items: [
+        { sku: "HTR-INV-8KW", quantity: 1 },
+        { sku: "STN-PERI-44LB", quantity: 2 },
+        { sku: "CTL-TOUCH-BLK", quantity: 1 },
+      ],
     },
-  });
+    {
+      customerIndex: 3,
+      loggedByName: "Fulfillment Staff",
+      days: 6,
+      items: [
+        { sku: "HTR-NORD-8KW", quantity: 1 },
+        { sku: "STN-PERI-44LB", quantity: 2 },
+      ],
+    },
+    {
+      customerIndex: 5,
+      loggedByName: "Admin",
+      days: 1,
+      items: [
+        { sku: "CTL-TOUCH-BLK", quantity: 1 },
+        { sku: "BNCH-ABACHI-6FT", quantity: 1 },
+      ],
+    },
+    {
+      customerIndex: 7,
+      loggedByName: "Fulfillment Staff",
+      days: 9,
+      items: [
+        { sku: "BNCH-ABACHI-7FT", quantity: 1 },
+        { sku: "BCK-CEDAR-4FT", quantity: 2 },
+      ],
+    },
+    {
+      customerIndex: 8,
+      loggedByName: "Fulfillment Staff",
+      days: 2,
+      items: [
+        { sku: "DOOR-GLS-CLR", quantity: 1 },
+        { sku: "ACC-BUCKET-CDR", quantity: 1 },
+      ],
+    },
+    {
+      customerIndex: 9,
+      loggedByName: "Fulfillment Staff",
+      days: 5,
+      items: [
+        { sku: "ACC-THERM-CDR", quantity: 1 },
+        { sku: "LGT-FIBER-150", quantity: 1 },
+        { sku: "ACC-BUCKET-CDR", quantity: 1 },
+      ],
+    },
+  ];
+
+  for (const lead of leads) {
+    const customer = customers[lead.customerIndex];
+    if (!customer) continue;
+
+    const items = lead.items
+      .map((line) => ({ variantId: variantsBySku.get(line.sku), quantity: line.quantity }))
+      .filter((line): line is { variantId: number; quantity: number } => line.variantId !== undefined);
+    if (items.length === 0) continue;
+
+    await prisma.cartLead.create({
+      data: {
+        userId: customer.id,
+        loggedByName: lead.loggedByName,
+        createdAt: new Date(Date.now() - lead.days * 24 * 60 * 60 * 1000),
+        items: { create: items },
+      },
+    });
+  }
 }
 
 // Reviews and Q&A aren't tied to a specific order the way returns are —
@@ -2027,7 +2098,7 @@ export async function runSeed(): Promise<string> {
   await seedBulkCustomerProfiles(bulkCustomers);
   const variantsBySku = await seedCatalog();
   await seedOrders(customers, variantsBySku);
-  await seedCartLeadExample(customers, variantsBySku);
+  await seedCartLeadExamples(customers, variantsBySku);
   await seedPartialRefundExample(customers, variantsBySku);
   await seedMoreOrderExamples(customers, variantsBySku);
   await seedReturnRequestExamples(customers, variantsBySku);
@@ -2053,6 +2124,7 @@ export async function runSeed(): Promise<string> {
     `example demonstrating the delete flow), 6 product questions covering unanswered/answered, all ` +
     `${totalCustomers} customers with full profile detail (name/phone/address — ${CUSTOMER_COUNT} hand-picked, ` +
     `${bulkCustomers.length} algorithmically generated), demo card metadata backfilled onto every card-paid ` +
-    `completed order, 1 cart-interest lead example, and enabled partial refunds in store settings.`
+    `completed order, 6 cart-interest leads across several customers (most holding multiple products), ` +
+    `and enabled partial refunds in store settings.`
   );
 }
