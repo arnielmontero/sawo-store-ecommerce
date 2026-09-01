@@ -468,6 +468,58 @@ model ProcessedWebhookEvent {
   processedAt DateTime @default(now())
 }
 
+// ── Notifications ──────────────────────────────────────────────────────
+
+// What condition raised this notification — used both to render an icon/
+// label and to de-duplicate (see notification.service.ts): the same
+// underlying thing (e.g. this order still being PENDING, this variant still
+// being low) should only ever produce one open notification, not a fresh
+// one on every check.
+enum NotificationType {
+  RETURN_REQUEST_PENDING
+  LOW_STOCK
+  ORDER_STALE
+}
+
+// A real, persistent inbox entry — distinct from just querying "is there a
+// pending return request right now," because isRead and resolvedAt track
+// state independently of the underlying condition. An admin can read a
+// low-stock alert without having restocked yet (isRead: true, resolvedAt:
+// null), and the condition being fixed later (restocked, request reviewed,
+// order progressed) sets resolvedAt without requiring the admin to have
+// read it first — the two are tracked separately on purpose, matching "read
+// vs addressed/fixed" being two different questions.
+model Notification {
+  id    Int              @id @default(autoincrement())
+  type  NotificationType
+  title String
+  body  String           @db.Text
+  // Where clicking this notification should take an admin — an order or
+  // inventory page path, e.g. "/orders/123" or "/inventory". Plain string
+  // rather than a polymorphic relation since notifications point at
+  // different kinds of things (orders, variants).
+  link  String
+
+  // De-duplication key: one open (unresolved) notification per (type,
+  // dedupeKey) — e.g. `return-request-42` or `variant-17-low-stock` — so
+  // the same event-driven hook firing again (a second partial refund
+  // request review, another sale drawing an already-low variant further
+  // down) doesn't spam a fresh row every time.
+  dedupeKey String
+
+  isRead     Boolean   @default(false)
+  // Set once the underlying condition is no longer true (request resolved,
+  // stock back above threshold, order progressed past PENDING/SHIPPED) —
+  // independent of isRead, see model comment above.
+  resolvedAt DateTime?
+
+  createdAt DateTime @default(now())
+
+  @@index([isRead])
+  @@index([resolvedAt])
+  @@index([dedupeKey])
+}
+
 // ── Store settings ─────────────────────────────────────────────────────
 
 // Singleton row (always id: 1) for store-wide admin-configurable values —

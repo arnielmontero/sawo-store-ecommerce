@@ -13,6 +13,7 @@ import { customersRouter } from "./routes/customers.routes";
 import { shippingRouter } from "./routes/shipping.routes";
 import { uploadsRouter } from "./routes/uploads.routes";
 import { settingsRouter } from "./routes/settings.routes";
+import { notificationsRouter } from "./routes/notifications.routes";
 import { errorHandler, notFoundHandler } from "./middleware/errorHandler";
 
 const app = express();
@@ -48,6 +49,7 @@ app.use("/api/v1/payments", paymentsRouter);
 app.use("/api/v1/customers", customersRouter);
 app.use("/api/v1/shipping", shippingRouter);
 app.use("/api/v1/settings", settingsRouter);
+app.use("/api/v1/notifications", notificationsRouter);
 
 app.use(notFoundHandler);
 app.use(errorHandler);

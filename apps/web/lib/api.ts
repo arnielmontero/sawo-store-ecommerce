@@ -833,3 +833,40 @@ export async function adjustStock(
   });
   return data.inventory;
 }
+
+// ── Notifications ──────────────────────────────────────────────────────
+
+export type NotificationType = "RETURN_REQUEST_PENDING" | "LOW_STOCK" | "ORDER_STALE";
+
+export interface AppNotification {
+  id: number;
+  type: NotificationType;
+  title: string;
+  body: string;
+  link: string;
+  isRead: boolean;
+  resolvedAt: string | null;
+  createdAt: string;
+}
+
+export interface NotificationsPage {
+  notifications: AppNotification[];
+  unreadCount: number;
+  pagination: { page: number; pageSize: number; total: number; totalPages: number };
+}
+
+export async function fetchNotifications(params: { unreadOnly?: boolean; page?: number } = {}): Promise<NotificationsPage> {
+  const query = new URLSearchParams();
+  if (params.unreadOnly) query.set("unreadOnly", "true");
+  if (params.page) query.set("page", String(params.page));
+  const qs = query.toString();
+  return apiFetch(`/api/v1/notifications${qs ? `?${qs}` : ""}`);
+}
+
+export async function markNotificationRead(id: number): Promise<void> {
+  await apiFetch(`/api/v1/notifications/${id}/read`, { method: "POST" });
+}
+
+export async function markAllNotificationsRead(): Promise<void> {
+  await apiFetch("/api/v1/notifications/read-all", { method: "POST" });
+}

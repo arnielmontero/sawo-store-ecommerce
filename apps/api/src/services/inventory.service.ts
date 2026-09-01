@@ -1,6 +1,7 @@
 import { Prisma, StockAdjustmentReason } from "@prisma/client";
 import { prisma } from "../lib/prisma";
 import { HttpError } from "../middleware/errorHandler";
+import { checkLowStockNotification } from "./notification.service";
 
 // Kept in sync with the LOW_STOCK_THRESHOLD constant on the frontend
 // (Catalog and Inventory pages) — this is the one place the backend needs
@@ -63,7 +64,7 @@ export async function commitReservedStock(
 ): Promise<void> {
   if (quantity <= 0) return;
 
-  await prisma.$transaction(async (tx) => {
+  const resultingQuantity = await prisma.$transaction(async (tx) => {
     await tx.$executeRaw`
       UPDATE Inventory
       SET stockQuantity = GREATEST(stockQuantity - ${quantity}, 0),
@@ -71,7 +72,7 @@ export async function commitReservedStock(
       WHERE variantId = ${variantId}
     `;
     const inventory = await tx.inventory.findUnique({ where: { variantId } });
-    if (!inventory) return;
+    if (!inventory) return null;
     await tx.stockAdjustment.create({
       data: {
         variantId,
@@ -82,7 +83,12 @@ export async function commitReservedStock(
         orderReference: order.orderReference,
       },
     });
+    return inventory.stockQuantity;
   });
+
+  if (resultingQuantity !== null) {
+    await checkLowStockNotification(variantId, resultingQuantity, LOW_STOCK_THRESHOLD);
+  }
 }
 
 // Restores previously-committed (deducted) stock — used for a return or
@@ -97,14 +103,14 @@ export async function restockCommittedStock(
 ): Promise<void> {
   if (quantity <= 0) return;
 
-  await prisma.$transaction(async (tx) => {
+  const resultingQuantity = await prisma.$transaction(async (tx) => {
     await tx.$executeRaw`
       UPDATE Inventory
       SET stockQuantity = stockQuantity + ${quantity}
       WHERE variantId = ${variantId}
     `;
     const inventory = await tx.inventory.findUnique({ where: { variantId } });
-    if (!inventory) return;
+    if (!inventory) return null;
     await tx.stockAdjustment.create({
       data: {
         variantId,
@@ -115,7 +121,12 @@ export async function restockCommittedStock(
         orderReference: order.orderReference,
       },
     });
+    return inventory.stockQuantity;
   });
+
+  if (resultingQuantity !== null) {
+    await checkLowStockNotification(variantId, resultingQuantity, LOW_STOCK_THRESHOLD);
+  }
 }
 
 // A staff member typing a new absolute quantity into the Inventory page —
@@ -133,12 +144,12 @@ export async function adjustStockManually(
 ): Promise<void> {
   if (newQuantity < 0) throw new HttpError(400, "Stock quantity can't be negative");
 
-  await prisma.$transaction(async (tx) => {
+  const changed = await prisma.$transaction(async (tx) => {
     const inventory = await tx.inventory.findUnique({ where: { variantId } });
     if (!inventory) throw new HttpError(404, "Variant not found");
 
     const delta = newQuantity - inventory.stockQuantity;
-    if (delta === 0) return;
+    if (delta === 0) return false;
 
     await tx.inventory.update({ where: { variantId }, data: { stockQuantity: newQuantity } });
     await tx.stockAdjustment.create({
@@ -151,7 +162,12 @@ export async function adjustStockManually(
         note,
       },
     });
+    return true;
   });
+
+  if (changed) {
+    await checkLowStockNotification(variantId, newQuantity, LOW_STOCK_THRESHOLD);
+  }
 }
 
 const PAGE_SIZE = 20;

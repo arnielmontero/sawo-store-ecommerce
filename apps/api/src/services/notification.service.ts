@@ -1,0 +1,190 @@
+import { NotificationType } from "@prisma/client";
+import { prisma } from "../lib/prisma";
+
+// Creates a notification unless an unresolved one with the same (type,
+// dedupeKey) already exists — the actual de-duplication guarantee this
+// whole module relies on. Called from the real code paths that cause each
+// condition (see the three trigger points below), not from a scheduled
+// sweep, except for ORDER_STALE which has no single "moment" it becomes
+// true and is instead checked when the inbox is opened (see
+// checkForStaleOrders).
+async function upsertNotification(input: {
+  type: NotificationType;
+  dedupeKey: string;
+  title: string;
+  body: string;
+  link: string;
+}) {
+  const existing = await prisma.notification.findFirst({
+    where: { type: input.type, dedupeKey: input.dedupeKey, resolvedAt: null },
+  });
+  if (existing) return existing;
+
+  return prisma.notification.create({
+    data: {
+      type: input.type,
+      dedupeKey: input.dedupeKey,
+      title: input.title,
+      body: input.body,
+      link: input.link,
+    },
+  });
+}
+
+// Marks every open (unresolved) notification for a given (type, dedupeKey)
+// resolved — called once the underlying condition is no longer true (a
+// return request reviewed, stock back above threshold, an order that
+// progressed past the stale status). Independent of isRead: an admin can
+// resolve something without ever having opened the inbox, and the
+// notification still shows as read/unread accurately for whoever does.
+async function resolveNotifications(type: NotificationType, dedupeKey: string) {
+  await prisma.notification.updateMany({
+    where: { type, dedupeKey, resolvedAt: null },
+    data: { resolvedAt: new Date() },
+  });
+}
+
+// ── Return requests ────────────────────────────────────────────────────
+
+export async function notifyReturnRequestPending(params: {
+  returnRequestId: number;
+  orderId: number;
+  orderReference: string;
+  reason: string;
+}) {
+  await upsertNotification({
+    type: NotificationType.RETURN_REQUEST_PENDING,
+    dedupeKey: `return-request-${params.returnRequestId}`,
+    title: `Return requested — ${params.orderReference}`,
+    body: params.reason,
+    link: `/orders/${params.orderId}`,
+  });
+}
+
+export async function resolveReturnRequestNotification(returnRequestId: number) {
+  await resolveNotifications(NotificationType.RETURN_REQUEST_PENDING, `return-request-${returnRequestId}`);
+}
+
+// ── Low stock ──────────────────────────────────────────────────────────
+
+// Matches Inventory's own LOW_STOCK_THRESHOLD (see inventory.service.ts) —
+// called from every stock-mutating function there right after the write,
+// so this fires from real sales/returns/manual adjustments, not just a
+// periodic scan.
+export async function checkLowStockNotification(
+  variantId: number,
+  stockQuantity: number,
+  lowStockThreshold: number
+) {
+  const dedupeKey = `variant-${variantId}`;
+
+  if (stockQuantity > lowStockThreshold) {
+    // Back above threshold (e.g. a restock) — whatever alert was open no
+    // longer applies.
+    await resolveNotifications(NotificationType.LOW_STOCK, dedupeKey);
+    return;
+  }
+
+  const variant = await prisma.productVariant.findUnique({
+    where: { id: variantId },
+    select: { sku: true, product: { select: { title: true } } },
+  });
+  if (!variant) return;
+
+  const isOut = stockQuantity === 0;
+  await upsertNotification({
+    type: NotificationType.LOW_STOCK,
+    dedupeKey,
+    title: `${isOut ? "Out of stock" : "Low stock"} — ${variant.product.title}`,
+    body: `${variant.sku} has ${stockQuantity} unit(s) remaining.`,
+    link: `/inventory`,
+  });
+}
+
+// ── Stale orders ───────────────────────────────────────────────────────
+
+// No single moment makes an order "24 hours old" the way a return request
+// or a sale is a discrete event — so this runs as a live check when the
+// inbox is opened (see notifications.routes.ts) instead of being triggered
+// from order.service.ts. Cheap: only ever scans orders already in PENDING
+// or SHIPPED, which is a small slice of the table.
+const PENDING_STALE_HOURS = 24;
+const SHIPPED_STALE_DAYS = 7;
+
+export async function checkForStaleOrders() {
+  const pendingCutoff = new Date(Date.now() - PENDING_STALE_HOURS * 60 * 60 * 1000);
+  const shippedCutoff = new Date(Date.now() - SHIPPED_STALE_DAYS * 24 * 60 * 60 * 1000);
+
+  const stalePending = await prisma.order.findMany({
+    where: { status: "PENDING", createdAt: { lte: pendingCutoff } },
+    select: { id: true, reference: true, createdAt: true },
+  });
+  const staleShipped = await prisma.order.findMany({
+    where: { status: "SHIPPED", updatedAt: { lte: shippedCutoff } },
+    select: { id: true, reference: true, updatedAt: true },
+  });
+
+  for (const order of stalePending) {
+    await upsertNotification({
+      type: NotificationType.ORDER_STALE,
+      dedupeKey: `order-${order.id}-pending`,
+      title: `Order still unpaid — ${order.reference}`,
+      body: `Placed over ${PENDING_STALE_HOURS} hours ago and still hasn't been paid.`,
+      link: `/orders/${order.id}`,
+    });
+  }
+  for (const order of staleShipped) {
+    await upsertNotification({
+      type: NotificationType.ORDER_STALE,
+      dedupeKey: `order-${order.id}-shipped`,
+      title: `Order shipped, not yet delivered — ${order.reference}`,
+      body: `Shipped over ${SHIPPED_STALE_DAYS} days ago with no delivery update.`,
+      link: `/orders/${order.id}`,
+    });
+  }
+}
+
+// Called wherever an order's status actually changes — resolves any stale
+// notification for it once it's no longer sitting in PENDING/SHIPPED, so a
+// paid or delivered order doesn't keep showing a stale alert.
+export async function resolveStaleOrderNotifications(orderId: number) {
+  await resolveNotifications(NotificationType.ORDER_STALE, `order-${orderId}-pending`);
+  await resolveNotifications(NotificationType.ORDER_STALE, `order-${orderId}-shipped`);
+}
+
+// ── Reading the inbox ──────────────────────────────────────────────────
+
+const PAGE_SIZE = 20;
+
+export async function listNotifications(filters: { unreadOnly?: boolean; page?: number }) {
+  const page = filters.page && filters.page > 0 ? filters.page : 1;
+  const where = {
+    resolvedAt: null,
+    ...(filters.unreadOnly ? { isRead: false } : {}),
+  };
+
+  const [notifications, total, unreadCount] = await Promise.all([
+    prisma.notification.findMany({
+      where,
+      orderBy: { createdAt: "desc" },
+      skip: (page - 1) * PAGE_SIZE,
+      take: PAGE_SIZE,
+    }),
+    prisma.notification.count({ where }),
+    prisma.notification.count({ where: { resolvedAt: null, isRead: false } }),
+  ]);
+
+  return {
+    notifications,
+    unreadCount,
+    pagination: { page, pageSize: PAGE_SIZE, total, totalPages: Math.max(1, Math.ceil(total / PAGE_SIZE)) },
+  };
+}
+
+export async function markNotificationRead(id: number) {
+  await prisma.notification.update({ where: { id }, data: { isRead: true } });
+}
+
+export async function markAllNotificationsRead() {
+  await prisma.notification.updateMany({ where: { resolvedAt: null, isRead: false }, data: { isRead: true } });
+}

@@ -5,6 +5,7 @@ import { canTransition } from "../lib/orderStateMachine";
 import { toCsv } from "../lib/csv";
 import { priceCart, type CartLine } from "./pricing.service";
 import { reserveStock, releaseStock, commitReservedStock, restockCommittedStock } from "./inventory.service";
+import { resolveStaleOrderNotifications } from "./notification.service";
 
 const PAGE_SIZE = 20;
 
@@ -351,4 +352,8 @@ export async function setOrderStatus(orderId: number, nextStatus: OrderStatus) {
     where: { id: orderId },
     data: { status: nextStatus, statusHistory: { create: { status: nextStatus } } },
   });
+  // The order just left whatever status it was in — any "still PENDING
+  // after 24h" / "still SHIPPED after 7d" alert for it no longer applies,
+  // regardless of which status it moved to.
+  await resolveStaleOrderNotifications(orderId);
 }

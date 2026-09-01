@@ -3,6 +3,7 @@ import { prisma } from "../lib/prisma";
 import { HttpError } from "../middleware/errorHandler";
 import { refundOrder } from "./payment.service";
 import { getOrderById } from "./order.service";
+import { notifyReturnRequestPending, resolveReturnRequestNotification } from "./notification.service";
 
 // Only orders that have actually been paid for (and haven't already
 // resolved to a terminal refunded state) can have a return requested — same
@@ -42,13 +43,20 @@ export async function logReturnRequest(input: LogReturnRequestInput) {
     }
   }
 
-  await prisma.returnRequest.create({
+  const created = await prisma.returnRequest.create({
     data: {
       orderId: input.orderId,
       reason: input.reason.trim(),
       loggedByName: input.loggedByName,
       items: { create: input.items.map((line) => ({ orderItemId: line.orderItemId, quantity: line.quantity })) },
     },
+  });
+
+  await notifyReturnRequestPending({
+    returnRequestId: created.id,
+    orderId: order.id,
+    orderReference: order.reference,
+    reason: created.reason,
   });
 
   return getOrderById(input.orderId);
@@ -78,6 +86,7 @@ export async function rejectReturnRequest(returnRequestId: number, reviewNote: s
       resolvedAt: new Date(),
     },
   });
+  await resolveReturnRequestNotification(request.id);
 
   return getOrderById(request.orderId);
 }
@@ -121,6 +130,7 @@ export async function approveReturnRequest(returnRequestId: number, input: Appro
       refundRecordId,
     },
   });
+  await resolveReturnRequestNotification(request.id);
 
   return getOrderById(request.orderId);
 }

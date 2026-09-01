@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
+import { NotificationsMenu } from "@/components/NotificationsMenu";
 
 export function Topbar() {
   const { user, logout } = useAuth();
@@ -22,10 +23,7 @@ export function Topbar() {
       </div>
 
       <div className="flex items-center gap-5">
-        {/* Decorative only — no notifications system exists yet. */}
-        <button className="text-ink-500 hover:text-ink-900" aria-label="Notifications">
-          <BellIcon className="h-5 w-5" />
-        </button>
+        <NotificationsMenu />
 
         <div className="relative">
           <button
@@ -63,15 +61,6 @@ function SearchIcon(props: React.SVGProps<SVGSVGElement>) {
     <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.6" {...props}>
       <circle cx="9" cy="9" r="6" />
       <path d="m17 17-3.5-3.5" />
-    </svg>
-  );
-}
-
-function BellIcon(props: React.SVGProps<SVGSVGElement>) {
-  return (
-    <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.6" {...props}>
-      <path d="M5 8a5 5 0 0 1 10 0c0 4 1.5 5 1.5 5h-13S5 12 5 8Z" />
-      <path d="M8.5 16a1.5 1.5 0 0 0 3 0" />
     </svg>
   );
 }

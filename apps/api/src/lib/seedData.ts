@@ -920,13 +920,30 @@ async function seedReturnRequestExamples(customers: { id: number }[], variantsBy
       include: { items: true },
     });
 
-    await prisma.returnRequest.create({
+    const returnRequest = await prisma.returnRequest.create({
       data: {
         orderId: order.id,
         reason: "Touch panel doesn't power on — customer confirmed outlet and breaker are fine.",
         loggedByName: "Fulfillment Staff",
         createdAt: requestedAt,
         items: { create: { orderItemId: order.items[0].id, quantity: 1 } },
+      },
+    });
+
+    // Matches what notifyReturnRequestPending (notification.service.ts)
+    // creates for a real request — seeded directly here (like the rest of
+    // this file bypasses the service layer for historical backdating)
+    // rather than through the service, but with the identical shape/
+    // dedupeKey, so this PENDING example shows up in the inbox exactly the
+    // way a real one would.
+    await prisma.notification.create({
+      data: {
+        type: "RETURN_REQUEST_PENDING",
+        dedupeKey: `return-request-${returnRequest.id}`,
+        title: `Return requested — ${order.reference}`,
+        body: returnRequest.reason,
+        link: `/orders/${order.id}`,
+        createdAt: requestedAt,
       },
     });
   }
