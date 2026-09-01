@@ -19,6 +19,7 @@ const TYPE_LABELS: Record<AppNotification["type"], string> = {
   RETURN_REQUEST_PENDING: "Return request",
   LOW_STOCK: "Inventory",
   ORDER_STALE: "Order",
+  QUESTION_PENDING: "Question",
 };
 
 function formatRelative(iso: string) {

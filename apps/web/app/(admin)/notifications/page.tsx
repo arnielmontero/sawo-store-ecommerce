@@ -17,12 +17,14 @@ const TYPE_OPTIONS: { value: TypeFilter; label: string }[] = [
   { value: "RETURN_REQUEST_PENDING", label: "Return requests" },
   { value: "LOW_STOCK", label: "Inventory" },
   { value: "ORDER_STALE", label: "Orders" },
+  { value: "QUESTION_PENDING", label: "Questions" },
 ];
 
 const TYPE_LABELS: Record<NotificationType, string> = {
   RETURN_REQUEST_PENDING: "Return request",
   LOW_STOCK: "Inventory",
   ORDER_STALE: "Order",
+  QUESTION_PENDING: "Question",
 };
 
 function formatDateTime(iso: string) {

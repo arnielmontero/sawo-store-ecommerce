@@ -836,7 +836,7 @@ export async function adjustStock(
 
 // ── Notifications ──────────────────────────────────────────────────────
 
-export type NotificationType = "RETURN_REQUEST_PENDING" | "LOW_STOCK" | "ORDER_STALE";
+export type NotificationType = "RETURN_REQUEST_PENDING" | "LOW_STOCK" | "ORDER_STALE" | "QUESTION_PENDING";
 
 export interface AppNotification {
   id: number;
@@ -878,4 +878,100 @@ export async function markNotificationRead(id: number): Promise<void> {
 
 export async function markAllNotificationsRead(): Promise<void> {
   await apiFetch("/api/v1/notifications/read-all", { method: "POST" });
+}
+
+// ── Reviews & Q&A ────────────────────────────────────────────────────────
+
+// Reviews publish immediately — no pending/approve status. Bad-faith
+// content is removed after the fact via deleteReview instead (see
+// review.service.ts). Only a customer who actually purchased the product
+// can be logged as the author (Verified Purchase) — see fetchProductPurchasers.
+export interface Review {
+  id: number;
+  productId: number;
+  userId: number | null;
+  authorName: string;
+  rating: number;
+  body: string;
+  createdAt: string;
+  product?: { id: number; title: string };
+}
+
+export interface ReviewsPage {
+  reviews: Review[];
+  pagination: { page: number; pageSize: number; total: number; totalPages: number };
+}
+
+export async function fetchReviews(params: { productId?: number; page?: number } = {}): Promise<ReviewsPage> {
+  const query = new URLSearchParams();
+  if (params.productId) query.set("productId", String(params.productId));
+  if (params.page) query.set("page", String(params.page));
+  const qs = query.toString();
+  return apiFetch(`/api/v1/reviews${qs ? `?${qs}` : ""}`);
+}
+
+// Who the "Log review" customer picker should offer — only customers who
+// could actually pass the backend's purchase check for this product.
+export async function fetchProductPurchasers(productId: number): Promise<{ id: number; email: string }[]> {
+  const data = await apiFetch(`/api/v1/reviews/purchasers?productId=${productId}`);
+  return data.purchasers;
+}
+
+export async function logReview(input: {
+  productId: number;
+  userId: number;
+  rating: number;
+  body: string;
+}): Promise<Review> {
+  const data = await apiFetch("/api/v1/reviews", { method: "POST", body: JSON.stringify(input) });
+  return data.review;
+}
+
+export async function deleteReview(id: number): Promise<void> {
+  await apiFetch(`/api/v1/reviews/${id}`, { method: "DELETE" });
+}
+
+export interface ProductQuestion {
+  id: number;
+  productId: number;
+  authorName: string;
+  question: string;
+  answer: string | null;
+  answeredByName: string | null;
+  answeredAt: string | null;
+  createdAt: string;
+  product?: { id: number; title: string };
+}
+
+export interface QuestionsPage {
+  questions: ProductQuestion[];
+  pagination: { page: number; pageSize: number; total: number; totalPages: number };
+}
+
+export async function fetchQuestions(
+  params: { productId?: number; unansweredOnly?: boolean; page?: number } = {}
+): Promise<QuestionsPage> {
+  const query = new URLSearchParams();
+  if (params.productId) query.set("productId", String(params.productId));
+  if (params.unansweredOnly) query.set("unansweredOnly", "true");
+  if (params.page) query.set("page", String(params.page));
+  const qs = query.toString();
+  return apiFetch(`/api/v1/questions${qs ? `?${qs}` : ""}`);
+}
+
+export async function logQuestion(input: {
+  productId: number;
+  authorName: string;
+  question: string;
+}): Promise<ProductQuestion> {
+  const data = await apiFetch("/api/v1/questions", { method: "POST", body: JSON.stringify(input) });
+  return data.question;
+}
+
+export async function answerQuestion(id: number, answer: string): Promise<ProductQuestion> {
+  const data = await apiFetch(`/api/v1/questions/${id}/answer`, {
+    method: "POST",
+    body: JSON.stringify({ answer }),
+  });
+  return data.question;
 }

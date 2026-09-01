@@ -19,6 +19,13 @@ async function clearStoreData() {
   // longer exist, or worse, silently point at a different order/variant
   // once fresh rows reuse those IDs after reseeding.
   await prisma.notification.deleteMany();
+  // Review/ProductQuestion cascade from Product (onDelete: Cascade, see
+  // schema.prisma) so this line isn't strictly required for those two —
+  // kept explicit anyway so this function reads as the full list of
+  // customer-facing data being wiped, matching the Notification precedent
+  // above (easy to forget a table here since nothing enforces it).
+  await prisma.review.deleteMany();
+  await prisma.productQuestion.deleteMany();
   await prisma.order.deleteMany();
   await prisma.product.deleteMany();
   await prisma.category.deleteMany();

@@ -50,7 +50,8 @@ model User {
   role         UserRole @default(CUSTOMER)
   createdAt    DateTime @default(now())
 
-  orders Order[]
+  orders  Order[]
+  reviews Review[]
 }
 
 enum UserRole {
@@ -123,9 +124,11 @@ model Product {
   categoryId Int?
   category   Category? @relation(fields: [categoryId], references: [id])
 
-  variants ProductVariant[]
-  images   ProductImage[]
-  tags     ProductTag[]
+  variants  ProductVariant[]
+  images    ProductImage[]
+  tags      ProductTag[]
+  reviews   Review[]
+  questions ProductQuestion[]
 
   @@index([isActive])
   @@index([categoryId])
@@ -479,6 +482,10 @@ enum NotificationType {
   RETURN_REQUEST_PENDING
   LOW_STOCK
   ORDER_STALE
+  // Reviews publish immediately (no pending state — see
+  // review.service.ts's logReview), so there's no REVIEW_PENDING type;
+  // only questions have an unanswered state worth alerting on.
+  QUESTION_PENDING
 }
 
 // A real, persistent inbox entry — distinct from just querying "is there a
@@ -518,6 +525,59 @@ model Notification {
   @@index([isRead])
   @@index([resolvedAt])
   @@index([dedupeKey])
+}
+
+// ── Reviews & Q&A ──────────────────────────────────────────────────────
+
+// Reviews publish immediately — no pending/approve gate. A pre-publish
+// moderation queue risks an admin selectively waving through only good
+// reviews, which is a worse trust problem than the one moderation is meant
+// to solve (see review.service.ts's logReview). Bad-faith/spam reviews are
+// handled after the fact via a hard delete instead, so there's no status
+// to track here — a Review row existing at all means it's live.
+model Review {
+  id         Int      @id @default(autoincrement())
+  product    Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  productId  Int
+  // A review requires an actual purchase (see review.service.ts's
+  // logReview — verified against a PAID/SHIPPED/DELIVERED order containing
+  // this product before the row is even created), so unlike ReturnRequest
+  // this IS a hard FK to the purchasing customer, not just a name snapshot.
+  // onDelete: SetNull rather than Cascade — a review shouldn't vanish just
+  // because the underlying account was removed later; authorName (below)
+  // keeps it legible either way.
+  user       User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  userId     Int?
+  // Snapshot of the purchasing customer's email at review time — same
+  // "plain string alongside the FK" pattern as OrderNote.authorName, so the
+  // review still reads correctly even if the User row is later removed.
+  authorName String
+  rating     Int // 1-5, validated at the service layer (Prisma has no CHECK constraint on MySQL here).
+  body       String   @db.Text
+  createdAt  DateTime @default(now())
+
+  @@index([productId])
+  @@index([userId])
+}
+
+// A customer question about a product, answered publicly by staff — kept
+// separate from Review (a rating + opinion) since a question has no rating
+// and its "resolution" is an answer being written, not an approve/reject
+// decision. A question with answeredAt: null is what's waiting in the
+// admin's Q&A queue.
+model ProductQuestion {
+  id             Int       @id @default(autoincrement())
+  product        Product   @relation(fields: [productId], references: [id], onDelete: Cascade)
+  productId      Int
+  authorName     String
+  question       String    @db.Text
+  answer         String?   @db.Text
+  answeredByName String?
+  answeredAt     DateTime?
+  createdAt      DateTime  @default(now())
+
+  @@index([productId])
+  @@index([answeredAt])
 }
 
 // ── Store settings ─────────────────────────────────────────────────────

@@ -18,6 +18,8 @@ import { ProductImageGallery } from "@/components/ProductImageGallery";
 import { VariantMatrixGenerator } from "@/components/VariantMatrixGenerator";
 import { AddVariantForm } from "@/components/AddVariantForm";
 import { TagInput } from "@/components/TagInput";
+import { ReviewsAndQnaPanel } from "@/components/ReviewsAndQnaPanel";
+import { useAuth } from "@/lib/auth-context";
 
 const LOW_STOCK_THRESHOLD = 10;
 
@@ -38,6 +40,7 @@ function localInputToIso(value: string): string | null {
 
 export default function ProductDetailPage() {
   const params = useParams<{ id: string }>();
+  const { user } = useAuth();
   const [product, setProduct] = useState<ProductDetail | null>(null);
   const [categories, setCategories] = useState<Category[]>([]);
   const [loading, setLoading] = useState(true);
@@ -728,6 +731,8 @@ export default function ProductDetailPage() {
         </div>
         )}
       </div>
+
+      <ReviewsAndQnaPanel productId={product.id} canModerate={user?.role === "ADMIN"} />
     </div>
   );
 }

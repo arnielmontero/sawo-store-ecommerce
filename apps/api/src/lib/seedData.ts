@@ -1088,6 +1088,243 @@ async function seedReturnRequestExamples(customers: { id: number }[], variantsBy
   }
 }
 
+// Reviews and Q&A aren't tied to a specific order the way returns are —
+// they're logged against a product directly (same "no live customer
+// session yet, staff logs it" reasoning as ReturnRequest, see
+// review.service.ts) — so this covers every status combination on a
+// product-by-product basis rather than mirroring order examples 1:1.
+async function seedReviewAndQuestionExamples() {
+  const existing = await prisma.review.findFirst({ where: { body: { contains: "touch panel is intuitive" } } });
+  if (existing) return;
+
+  const slugs = [
+    "nordic-electric-sauna-heater",
+    "innova-digital-sauna-heater",
+    "barrel-sauna-wood-heater",
+    "finnish-peridotite-sauna-stones",
+    "olivine-diabase-sauna-stones",
+    "innova-touch-control-panel",
+    "classic-analog-control-panel",
+    "abachi-wood-sauna-bench-set",
+    "cedar-contoured-backrest",
+    "frameless-glass-sauna-door",
+    "cedar-framed-glass-door",
+    "fiber-optic-star-ceiling-kit",
+    "sauna-bucket-ladle-set",
+    "sauna-thermometer-hygrometer",
+  ] as const;
+  const products = Object.fromEntries(
+    await Promise.all(
+      slugs.map(async (slug) => [slug, await prisma.product.findUnique({ where: { slug } })] as const)
+    )
+  ) as Record<(typeof slugs)[number], { id: number; title: string } | null>;
+  if (Object.values(products).some((p) => !p)) return;
+  const p = products as Record<(typeof slugs)[number], { id: number; title: string }>;
+
+  const daysAgo = (n: number) => new Date(Date.now() - n * 24 * 60 * 60 * 1000);
+
+  // Reviews publish immediately (see review.service.ts's logReview) — but
+  // ALSO require a real purchase there (Verified Purchase, same as any
+  // major storefront), so seed data has to honor that too rather than just
+  // attaching a made-up name. Looked up per product from real order
+  // history (this runs after seedBulkOrders — see runSeed), same
+  // PAID/SHIPPED/DELIVERED "counts as a completed sale" check the service
+  // itself uses. A product with no genuine purchaser yet is skipped rather
+  // than faked.
+  const PURCHASED_STATUSES = ["PAID", "SHIPPED", "DELIVERED"] as const;
+  async function findPurchaser(productId: number) {
+    const order = await prisma.order.findFirst({
+      where: { status: { in: [...PURCHASED_STATUSES] }, items: { some: { variant: { productId } } } },
+      select: { user: { select: { id: true, email: true } } },
+    });
+    return order?.user ?? null;
+  }
+
+  // Mix of positive, mixed, and negative feedback across most of the
+  // catalog, not just one product each, so the Reviews tab has enough
+  // volume to actually test filtering/scrolling/deleting against. The
+  // obvious spam one is kept on purpose so Delete has something real to
+  // demonstrate against.
+  const reviews: { slug: (typeof slugs)[number]; rating: number; body: string; days: number }[] = [
+    {
+      slug: "nordic-electric-sauna-heater",
+      rating: 4,
+      body: "Heats up fast and the touch panel is intuitive. Wish the door seal were a bit tighter.",
+      days: 2,
+    },
+    {
+      slug: "nordic-electric-sauna-heater",
+      rating: 2,
+      body: "Runs hotter than the room-size chart suggests — had to crack the door to avoid overheating our small cabin.",
+      days: 18,
+    },
+    {
+      slug: "innova-digital-sauna-heater",
+      rating: 5,
+      body: "Digital readout is a nice touch, install was straightforward with the included bracket.",
+      days: 9,
+    },
+    {
+      slug: "barrel-sauna-wood-heater",
+      rating: 3,
+      body: "Does the job but the wood smell was much stronger than expected the first few weeks.",
+      days: 25,
+    },
+    {
+      slug: "finnish-peridotite-sauna-stones",
+      rating: 5,
+      body: "Great steam, no cracking after three months of weekly use. Exactly the size I needed.",
+      days: 5,
+    },
+    {
+      slug: "olivine-diabase-sauna-stones",
+      rating: 4,
+      body: "Solid stones, though a few arrived with sharp edges — nothing a quick rinse and inspection didn't fix.",
+      days: 14,
+    },
+    {
+      slug: "innova-touch-control-panel",
+      rating: 1,
+      body: "buy bitcoin at www.totally-not-spam.example first heater ever made 100% real",
+      days: 11,
+    },
+    {
+      slug: "classic-analog-control-panel",
+      rating: 5,
+      body: "Simple, reliable, no software to fuss with. Exactly what I wanted after a smart panel died on me.",
+      days: 30,
+    },
+    {
+      slug: "abachi-wood-sauna-bench-set",
+      rating: 2,
+      body: "Bench slats are noticeably thinner than the photos imply — feels less sturdy than I'd like for the price.",
+      days: 20,
+    },
+    {
+      slug: "cedar-contoured-backrest",
+      rating: 5,
+      body: "The contour actually matters — much more comfortable than the flat backrest we replaced.",
+      days: 6,
+    },
+    {
+      slug: "frameless-glass-sauna-door",
+      rating: 4,
+      body: "Looks great and the seal is tight. Shipping had a small scare (box was dented) but the glass was fine.",
+      days: 16,
+    },
+    {
+      slug: "sauna-bucket-ladle-set",
+      rating: 5,
+      body: "Basic but well made — the ladle handle doesn't heat up like our old one did.",
+      days: 3,
+    },
+    {
+      slug: "sauna-thermometer-hygrometer",
+      rating: 3,
+      body: "Readings seem about 5 degrees off compared to a separate thermometer we already had.",
+      days: 22,
+    },
+  ];
+  for (const r of reviews) {
+    const purchaser = await findPurchaser(p[r.slug].id);
+    if (!purchaser) continue;
+    await prisma.review.create({
+      data: {
+        productId: p[r.slug].id,
+        userId: purchaser.id,
+        authorName: purchaser.email,
+        rating: r.rating,
+        body: r.body,
+        createdAt: daysAgo(r.days),
+      },
+    });
+  }
+
+  // Q&A — a spread of unanswered (sits in the queue) and answered
+  // questions across several products, not just one pair, so there's
+  // enough volume to test the unanswered filter and notification badges.
+  const questions: {
+    slug: (typeof slugs)[number];
+    authorName: string;
+    question: string;
+    answer?: string;
+    answeredByName?: string;
+    days: number;
+    answeredDays?: number;
+  }[] = [
+    {
+      slug: "nordic-electric-sauna-heater",
+      authorName: "Priya K.",
+      question: "Can this run on a 220V single-phase supply, or does it need three-phase?",
+      days: 1,
+    },
+    {
+      slug: "finnish-peridotite-sauna-stones",
+      authorName: "Owen L.",
+      question: "How many kg do I need for an 8kW heater?",
+      answer: "For an 8kW heater we recommend around 20kg (44lb) of stones — this bag is sized for that.",
+      answeredByName: "Fulfillment Staff",
+      days: 7,
+      answeredDays: 6,
+    },
+    {
+      slug: "barrel-sauna-wood-heater",
+      authorName: "Hannah S.",
+      question: "Is the barrel heater rated for outdoor/uncovered installation, or does it need a roof over it?",
+      days: 4,
+    },
+    {
+      slug: "innova-touch-control-panel",
+      authorName: "Derek F.",
+      question: "Does the touch panel support a delay-start timer, or only on/off?",
+      answer: "It supports a delay-start of up to 4 hours — you'll find it under the clock icon in the settings menu.",
+      answeredByName: "Admin",
+      days: 13,
+      answeredDays: 12,
+    },
+    {
+      slug: "frameless-glass-sauna-door",
+      authorName: "Miriam A.",
+      question: "What's the standard rough opening size this door is built for?",
+      days: 2,
+    },
+    {
+      slug: "abachi-wood-sauna-bench-set",
+      authorName: "Victor N.",
+      question: "Can the bench set be cut down for a narrower cabin, or is it a fixed size?",
+      answer: "The slats can be trimmed on-site — just keep the support frame spacing the same and it'll hold fine.",
+      answeredByName: "Fulfillment Staff",
+      days: 17,
+      answeredDays: 15,
+    },
+  ];
+  for (const q of questions) {
+    const created = await prisma.productQuestion.create({
+      data: {
+        productId: p[q.slug].id,
+        authorName: q.authorName,
+        question: q.question,
+        answer: q.answer,
+        answeredByName: q.answeredByName,
+        answeredAt: q.answer ? daysAgo(q.answeredDays!) : undefined,
+        createdAt: daysAgo(q.days),
+      },
+    });
+    if (!q.answer) {
+      await prisma.notification.create({
+        data: {
+          type: "QUESTION_PENDING",
+          dedupeKey: `question-${created.id}`,
+          title: `New question — ${p[q.slug].title}`,
+          body: created.question,
+          link: `/catalog/${p[q.slug].id}`,
+          createdAt: created.createdAt,
+        },
+      });
+    }
+  }
+}
+
 // Order notes on a couple of the plain flat-seeded orders (not just the
 // hand-built refund examples) so the Notes UI shows realistic non-refund
 // use too — shipping instructions, delivery follow-ups, etc.
@@ -1504,6 +1741,10 @@ export async function runSeed(): Promise<string> {
   await seedReturnRequestExamples(customers, variantsBySku);
   await seedNotesOnExistingOrders();
   await seedBulkOrders([...customers, ...bulkCustomers], variantsBySku);
+  // Runs after seedBulkOrders — reviews now require a real purchase (see
+  // review.service.ts's logReview), so there needs to be purchase history
+  // to attach them to first.
+  await seedReviewAndQuestionExamples();
   await backfillStockAdjustmentHistory();
 
   const productCount = PRODUCTS.length;
@@ -1514,7 +1755,9 @@ export async function runSeed(): Promise<string> {
     `Seeded admin user (admin / admin123), staff user (staff / staff123), ${totalCustomers} customers, ` +
     `${CATEGORIES.length} categories, ${productCount} products (${variantCount} variants), ${totalOrders} orders total ` +
     `(${BULK_ORDER_COUNT} bulk-generated over the past 12 months, 3 hand-crafted refund examples, 3 return-request ` +
-    `examples covering pending/approved/rejected, and ${ORDERS.length} curated demo orders), 4 order notes, and ` +
+    `examples covering pending/approved/rejected, and ${ORDERS.length} curated demo orders), 4 order notes, ` +
+    `13 product reviews spanning the catalog (published immediately, mixed ratings, one obvious spam ` +
+    `example demonstrating the delete flow) and 6 product questions covering unanswered/answered, and ` +
     `enabled partial refunds in store settings.`
   );
 }

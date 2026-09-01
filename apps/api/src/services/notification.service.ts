@@ -65,6 +65,25 @@ export async function resolveReturnRequestNotification(returnRequestId: number) 
   await resolveNotifications(NotificationType.RETURN_REQUEST_PENDING, `return-request-${returnRequestId}`);
 }
 
+// ── Q&A ─────────────────────────────────────────────────────────────────
+// (Reviews publish immediately with no pending state — see
+// review.service.ts's logReview — so there's no equivalent notification
+// for them.)
+
+export async function notifyQuestionPending(params: { questionId: number; productId: number; productTitle: string; question: string }) {
+  await upsertNotification({
+    type: NotificationType.QUESTION_PENDING,
+    dedupeKey: `question-${params.questionId}`,
+    title: `New question — ${params.productTitle}`,
+    body: params.question,
+    link: `/catalog/${params.productId}`,
+  });
+}
+
+export async function resolveQuestionNotification(questionId: number) {
+  await resolveNotifications(NotificationType.QUESTION_PENDING, `question-${questionId}`);
+}
+
 // ── Low stock ──────────────────────────────────────────────────────────
 
 // Matches Inventory's own LOW_STOCK_THRESHOLD (see inventory.service.ts) —
