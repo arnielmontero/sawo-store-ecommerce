@@ -46,6 +46,33 @@ export async function createPaymentIntent(orderId: number) {
   return { clientSecret: intent.client_secret };
 }
 
+// Pulls card brand/last4 from Stripe's own expanded payment_method — never
+// the raw card number, which this app's Stripe integration (PaymentIntents
+// API, card entered client-side against Stripe's own Elements/SDK) never
+// receives or has PCI scope over in the first place. Best-effort: a webhook
+// failure here shouldn't block the order actually being marked PAID, so
+// errors are swallowed rather than thrown.
+async function recordCardMetadata(orderId: number, intent: Stripe.PaymentIntent) {
+  try {
+    const paymentMethodId =
+      typeof intent.payment_method === "string" ? intent.payment_method : intent.payment_method?.id;
+    if (!paymentMethodId) return;
+
+    const paymentMethod = await stripe.paymentMethods.retrieve(paymentMethodId);
+    await prisma.order.update({
+      where: { id: orderId },
+      data: {
+        cardBrand: paymentMethod.card?.brand ?? null,
+        cardLast4: paymentMethod.card?.last4 ?? null,
+        paymentStatus: intent.status,
+      },
+    });
+  } catch {
+    // Card metadata is a nice-to-have display detail, not load-bearing for
+    // the order's own state — never let this block the real payment flow.
+  }
+}
+
 // Verifies the webhook's Stripe signature (proves the request really came
 // from Stripe, not a forged "payment succeeded" call from anyone who finds
 // the endpoint), then checks the event.id against ProcessedWebhookEvent
@@ -66,12 +93,20 @@ export async function handleStripeWebhook(rawBody: Buffer, signature: string, we
     const intent = event.data.object as Stripe.PaymentIntent;
     const orderId = Number(intent.metadata.orderId);
     if (orderId) {
+      await recordCardMetadata(orderId, intent);
       await updateOrderStatus(orderId, OrderStatus.PAID);
     }
   } else if (event.type === "payment_intent.payment_failed") {
     const intent = event.data.object as Stripe.PaymentIntent;
     const orderId = Number(intent.metadata.orderId);
     if (orderId) {
+      await prisma.order.update({
+        where: { id: orderId },
+        data: {
+          paymentStatus: intent.status,
+          paymentDeclineCode: intent.last_payment_error?.decline_code ?? intent.last_payment_error?.code ?? null,
+        },
+      });
       await updateOrderStatus(orderId, OrderStatus.CANCELLED);
     }
   }

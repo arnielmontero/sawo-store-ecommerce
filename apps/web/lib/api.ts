@@ -173,6 +173,7 @@ export interface CreateProductInput {
 export interface Customer {
   id: number;
   email: string;
+  name: string | null;
   createdAt: string;
   orderCount: number;
   totalSpentCents: number;
@@ -183,15 +184,110 @@ export interface CustomersPage {
   pagination: { page: number; pageSize: number; total: number; totalPages: number };
 }
 
+export interface CustomerOrderItem {
+  id: number;
+  variantId: number;
+  quantity: number;
+  unitPriceCents: number;
+  variant: { sku: string; product: { id: number; title: string } };
+}
+
+// Card metadata comes from Stripe's own expanded payment_method — never raw
+// card numbers, this app's Stripe integration never has PCI scope over
+// those (see payment.service.ts's recordCardMetadata). Null for orders that
+// never reached a real Stripe charge.
 export interface CustomerOrder extends Order {
-  items: { id: number; variantId: number; quantity: number; unitPriceCents: number }[];
+  items: CustomerOrderItem[];
+  refunds: { id: number; amountCents: number; createdAt: string }[];
+  cardBrand: string | null;
+  cardLast4: string | null;
+  paymentStatus: string | null;
+  paymentDeclineCode: string | null;
+}
+
+export interface ProductPurchaseSummary {
+  productId: number;
+  productTitle: string;
+  quantity: number;
+  totalSpentCents: number;
 }
 
 export interface CustomerDetail {
   id: number;
   email: string;
+  name: string | null;
+  phone: string | null;
+  addressLine1: string | null;
+  addressLine2: string | null;
+  city: string | null;
+  state: string | null;
+  postalCode: string | null;
+  country: string | null;
   createdAt: string;
   orders: CustomerOrder[];
+  totalSpentCents: number;
+  productsPurchased: ProductPurchaseSummary[];
+  reviews: Review[];
+  questions: ProductQuestion[];
+  cartLeads: CartLead[];
+}
+
+export interface UpdateCustomerProfileInput {
+  name?: string | null;
+  phone?: string | null;
+  addressLine1?: string | null;
+  addressLine2?: string | null;
+  city?: string | null;
+  state?: string | null;
+  postalCode?: string | null;
+  country?: string | null;
+}
+
+export async function updateCustomerProfile(id: number, input: UpdateCustomerProfileInput): Promise<CustomerDetail> {
+  const data = await apiFetch(`/api/v1/customers/${id}`, { method: "PATCH", body: JSON.stringify(input) });
+  return data.customer;
+}
+
+// ── Cart leads ─────────────────────────────────────────────────────────
+// Staff-logged record of items a customer said they wanted but hadn't
+// bought yet — there's no real add-to-cart flow in this admin-only app
+// (see schema.prisma's CartLead model), so this is a lead, not a live cart.
+
+export interface CartLeadItem {
+  id: number;
+  variantId: number;
+  quantity: number;
+  variant: { sku: string; priceCents: number; product: { id: number; title: string } };
+}
+
+export interface CartLead {
+  id: number;
+  userId: number;
+  loggedByName: string;
+  note: string | null;
+  createdAt: string;
+  items: CartLeadItem[];
+}
+
+export async function fetchCartLeads(userId: number): Promise<CartLead[]> {
+  const data = await apiFetch(`/api/v1/customers/${userId}/cart-leads`);
+  return data.cartLeads;
+}
+
+export async function logCartLead(
+  userId: number,
+  items: { variantId: number; quantity: number }[],
+  note?: string
+): Promise<CartLead> {
+  const data = await apiFetch(`/api/v1/customers/${userId}/cart-leads`, {
+    method: "POST",
+    body: JSON.stringify({ items, note }),
+  });
+  return data.cartLead;
+}
+
+export async function deleteCartLead(leadId: number): Promise<void> {
+  await apiFetch(`/api/v1/customers/cart-leads/${leadId}`, { method: "DELETE" });
 }
 
 export interface PendingShipment extends Order {
@@ -648,8 +744,10 @@ export async function rejectReturnRequest(requestId: number, reviewNote?: string
   return data.order;
 }
 
-export async function fetchCustomers(page = 1): Promise<CustomersPage> {
-  return apiFetch(`/api/v1/customers?page=${page}`);
+export async function fetchCustomers(page = 1, search?: string): Promise<CustomersPage> {
+  const query = new URLSearchParams({ page: String(page) });
+  if (search) query.set("search", search);
+  return apiFetch(`/api/v1/customers?${query.toString()}`);
 }
 
 export async function fetchCustomer(id: number): Promise<CustomerDetail> {
@@ -934,6 +1032,7 @@ export async function deleteReview(id: number): Promise<void> {
 export interface ProductQuestion {
   id: number;
   productId: number;
+  userId: number | null;
   authorName: string;
   question: string;
   answer: string | null;
@@ -961,7 +1060,8 @@ export async function fetchQuestions(
 
 export async function logQuestion(input: {
   productId: number;
-  authorName: string;
+  userId?: number;
+  authorName?: string;
   question: string;
 }): Promise<ProductQuestion> {
   const data = await apiFetch("/api/v1/questions", { method: "POST", body: JSON.stringify(input) });

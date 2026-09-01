@@ -93,7 +93,8 @@ questionsRouter.use(requireAuth);
 
 const logQuestionSchema = z.object({
   productId: z.number().int().positive(),
-  authorName: z.string().min(1).max(120),
+  userId: z.number().int().positive().optional(),
+  authorName: z.string().min(1).max(120).optional(),
   question: z.string().min(1).max(2000),
 });
 

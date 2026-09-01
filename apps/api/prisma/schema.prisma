@@ -50,8 +50,26 @@ model User {
   role         UserRole @default(CUSTOMER)
   createdAt    DateTime @default(now())
 
-  orders  Order[]
-  reviews Review[]
+  // Contact/profile fields — all optional since there's no storefront
+  // signup flow in this system yet (see checkout()); staff fill these in
+  // from the Customer detail page as they learn them (phone call, support
+  // ticket, etc.), same "captured over time by staff" reasoning as
+  // OrderNote/ReturnRequest. addressLine1/2 mirror Order.shippingAddress's
+  // level of detail but as structured fields (that one stays a free-text
+  // snapshot per-order — this is the customer's standing contact info).
+  name         String?
+  phone        String?
+  addressLine1 String?
+  addressLine2 String?
+  city         String?
+  state        String?
+  postalCode   String?
+  country      String?
+
+  orders    Order[]
+  reviews   Review[]
+  questions ProductQuestion[]
+  cartLeads CartLead[]
 }
 
 enum UserRole {
@@ -183,6 +201,7 @@ model ProductVariant {
   inventory        Inventory?
   orderItems       OrderItem[]
   stockAdjustments StockAdjustment[]
+  cartLeadItems    CartLeadItem[]
 
   @@index([productId])
 }
@@ -293,6 +312,17 @@ model Order {
   // instead of creating a duplicate charge.
   paymentAttemptCount   Int     @default(0)
   stripePaymentIntentId String? @unique
+
+  // Card metadata Stripe itself provides on a successful charge — never raw
+  // card numbers (PCI scope never touches this app, see payment.service.ts's
+  // handleStripeWebhook). Populated from the expanded PaymentIntent's
+  // payment_method on payment_intent.succeeded; stays null for orders that
+  // never reached a real Stripe charge (PENDING/CANCELLED, or seeded demo
+  // orders with a fake stripePaymentIntentId).
+  cardBrand          String?
+  cardLast4          String?
+  paymentStatus      String? // Stripe's own PaymentIntent.status string (e.g. "succeeded") — a snapshot, not re-derived from our OrderStatus.
+  paymentDeclineCode String? // Set only if a payment_intent.payment_failed carried a decline/error code.
 
   // Running total refunded so far across every RefundRecord for this order —
   // caps how much more can still be refunded (totalCents - refundedCents).
@@ -569,6 +599,12 @@ model ProductQuestion {
   id             Int       @id @default(autoincrement())
   product        Product   @relation(fields: [productId], references: [id], onDelete: Cascade)
   productId      Int
+  // Optional, unlike Review.userId — asking a question doesn't require a
+  // purchase (see review.service.ts's logQuestion), so this stays nullable
+  // for a question logged for a browsing/prospective customer who has no
+  // User row yet. Same onDelete: SetNull reasoning as Review.
+  user           User?     @relation(fields: [userId], references: [id], onDelete: SetNull)
+  userId         Int?
   authorName     String
   question       String    @db.Text
   answer         String?   @db.Text
@@ -578,6 +614,42 @@ model ProductQuestion {
 
   @@index([productId])
   @@index([answeredAt])
+  @@index([userId])
+}
+
+// ── Cart leads ─────────────────────────────────────────────────────────
+
+// There's no storefront/live customer session in this system (see
+// checkout() — an order is created directly from a cart array passed at
+// checkout time, with nothing persisted before that). So this isn't a real
+// transactional cart — it's a staff-logged record of items a customer said
+// they were interested in but hadn't bought yet (phone/chat inquiry), same
+// "logged on the customer's behalf" pattern as ReturnRequest/Review. Lets
+// admin follow up on a lead without needing a real add-to-cart flow to
+// exist first.
+model CartLead {
+  id           Int      @id @default(autoincrement())
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId       Int
+  loggedByName String
+  note         String?  @db.Text
+  createdAt    DateTime @default(now())
+
+  items CartLeadItem[]
+
+  @@index([userId])
+}
+
+model CartLeadItem {
+  id         Int            @id @default(autoincrement())
+  cartLead   CartLead       @relation(fields: [cartLeadId], references: [id], onDelete: Cascade)
+  cartLeadId Int
+  variant    ProductVariant @relation(fields: [variantId], references: [id], onDelete: Cascade)
+  variantId  Int
+  quantity   Int
+
+  @@index([cartLeadId])
+  @@index([variantId])
 }
 
 // ── Store settings ─────────────────────────────────────────────────────

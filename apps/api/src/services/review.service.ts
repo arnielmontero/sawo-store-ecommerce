@@ -113,18 +113,31 @@ export async function listReviews(filters: ListReviewsFilters) {
 
 export interface LogQuestionInput {
   productId: number;
-  authorName: string;
+  // Optional — asking a question doesn't require a purchase (unlike
+  // Review), so this can be logged for a browsing/prospective customer
+  // with no User row at all, using just a free-typed name. When logged
+  // from a Customer's own page, userId is set and authorName is derived
+  // from that customer instead.
+  userId?: number;
+  authorName?: string;
   question: string;
 }
 
 export async function logQuestion(input: LogQuestionInput) {
   const product = await prisma.product.findUnique({ where: { id: input.productId } });
   if (!product) throw new HttpError(404, "Product not found");
-  if (!input.authorName.trim()) throw new HttpError(400, "Author name is required");
   if (!input.question.trim()) throw new HttpError(400, "Question is required");
 
+  let authorName = input.authorName?.trim();
+  if (input.userId) {
+    const user = await prisma.user.findUnique({ where: { id: input.userId } });
+    if (!user) throw new HttpError(404, "Customer not found");
+    authorName = user.email;
+  }
+  if (!authorName) throw new HttpError(400, "Author name is required");
+
   const question = await prisma.productQuestion.create({
-    data: { productId: input.productId, authorName: input.authorName.trim(), question: input.question.trim() },
+    data: { productId: input.productId, userId: input.userId, authorName, question: input.question.trim() },
   });
 
   await notifyQuestionPending({ questionId: question.id, productId: product.id, productTitle: product.title, question: question.question });

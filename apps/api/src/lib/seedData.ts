@@ -1088,6 +1088,93 @@ async function seedReturnRequestExamples(customers: { id: number }[], variantsBy
   }
 }
 
+// Fills in full profile detail (name/phone/address) for a handful of the
+// curated customers — demonstrates the Customer page's "full customer
+// information" section with real data rather than every customer showing
+// blank fields. Most seeded customers stay email-only, matching how a real
+// store's contact info gets filled in gradually by staff over time, not
+// all at once at signup (there's no storefront signup flow here at all —
+// see checkout()).
+async function seedCustomerProfileDetails(customers: { id: number }[]) {
+  const profiles = [
+    {
+      index: 0,
+      name: "Dana Reyes",
+      phone: "+1 217-555-0142",
+      addressLine1: "221 Baker Street",
+      city: "Springfield",
+      state: "IL",
+      postalCode: "62701",
+      country: "United States",
+    },
+    {
+      index: 1,
+      name: "Marcus Tan",
+      phone: "+1 305-555-0198",
+      addressLine1: "48 Ocean Drive",
+      addressLine2: "Unit 4B",
+      city: "Miami",
+      state: "FL",
+      postalCode: "33139",
+      country: "United States",
+    },
+    {
+      index: 4,
+      name: "Ingrid Petersen",
+      phone: "+1 512-555-0177",
+      addressLine1: "77 Elm Court",
+      city: "Austin",
+      state: "TX",
+      postalCode: "78701",
+      country: "United States",
+    },
+  ];
+
+  for (const profile of profiles) {
+    const customer = customers[profile.index];
+    if (!customer) continue;
+    const existing = await prisma.user.findUnique({ where: { id: customer.id }, select: { name: true } });
+    if (existing?.name) continue; // idempotent — only fill in once
+    await prisma.user.update({
+      where: { id: customer.id },
+      data: {
+        name: profile.name,
+        phone: profile.phone,
+        addressLine1: profile.addressLine1,
+        addressLine2: profile.addressLine2,
+        city: profile.city,
+        state: profile.state,
+        postalCode: profile.postalCode,
+        country: profile.country,
+      },
+    });
+  }
+}
+
+// One example lead — a customer who called in asking about a heater +
+// stones combo but hasn't ordered yet, demonstrating the Customer page's
+// "Cart interest" section (see cartLead.service.ts — there's no real
+// add-to-cart flow in this admin-only app, so this is staff-logged).
+async function seedCartLeadExample(customers: { id: number }[], variantsBySku: Map<string, number>) {
+  const existing = await prisma.cartLead.findFirst({ where: { userId: customers[2]?.id } });
+  if (existing) return;
+  if (!customers[2]) return;
+
+  const heaterSku = "HTR-INV-8KW";
+  const heaterVariantId = variantsBySku.get(heaterSku);
+  if (!heaterVariantId) return;
+
+  await prisma.cartLead.create({
+    data: {
+      userId: customers[2].id,
+      loggedByName: "Fulfillment Staff",
+      note: "Called asking about the Innova digital heater — said they'd decide after checking cabin dimensions.",
+      createdAt: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000),
+      items: { create: [{ variantId: heaterVariantId, quantity: 1 }] },
+    },
+  });
+}
+
 // Reviews and Q&A aren't tied to a specific order the way returns are —
 // they're logged against a product directly (same "no live customer
 // session yet, staff logs it" reasoning as ReturnRequest, see
@@ -1734,8 +1821,10 @@ export async function runSeed(): Promise<string> {
   await seedSettings();
   const customers = await seedCustomers();
   const bulkCustomers = await seedBulkCustomers();
+  await seedCustomerProfileDetails(customers);
   const variantsBySku = await seedCatalog();
   await seedOrders(customers, variantsBySku);
+  await seedCartLeadExample(customers, variantsBySku);
   await seedPartialRefundExample(customers, variantsBySku);
   await seedMoreOrderExamples(customers, variantsBySku);
   await seedReturnRequestExamples(customers, variantsBySku);
@@ -1757,7 +1846,7 @@ export async function runSeed(): Promise<string> {
     `(${BULK_ORDER_COUNT} bulk-generated over the past 12 months, 3 hand-crafted refund examples, 3 return-request ` +
     `examples covering pending/approved/rejected, and ${ORDERS.length} curated demo orders), 4 order notes, ` +
     `13 product reviews spanning the catalog (published immediately, mixed ratings, one obvious spam ` +
-    `example demonstrating the delete flow) and 6 product questions covering unanswered/answered, and ` +
-    `enabled partial refunds in store settings.`
+    `example demonstrating the delete flow), 6 product questions covering unanswered/answered, 3 customers ` +
+    `with full profile detail, 1 cart-interest lead example, and enabled partial refunds in store settings.`
   );
 }
