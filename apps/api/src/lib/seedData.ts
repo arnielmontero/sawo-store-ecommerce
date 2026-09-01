@@ -1091,13 +1091,12 @@ async function seedReturnRequestExamples(customers: { id: number }[], variantsBy
 // Fills in full profile detail (name/phone/address) for every one of the
 // CUSTOMER_COUNT curated customers (the ones with hand-crafted named
 // orders, indices 0-11) — demonstrates the Customer page's "full customer
-// information" section fully populated rather than mostly blank. The 168
-// BULK_CUSTOMER_COUNT customers stay email-only on purpose: they exist to
-// simulate scale/volume (see seedBulkOrders), not to be individually
-// detailed, same reasoning already applied to them everywhere else in this
-// file (no hand-crafted orders, no named review authors, etc). A real
-// store's contact info is filled in gradually by staff over time anyway —
-// there's no storefront signup flow here at all (see checkout()).
+// information" section fully populated rather than mostly blank. These get
+// hand-picked, individually distinct profiles; the BULK_CUSTOMER_COUNT
+// customers get algorithmically generated ones instead (see
+// seedBulkCustomerProfiles below) since hand-writing 168 is impractical. A
+// real store's contact info is filled in gradually by staff over time
+// anyway — there's no storefront signup flow here at all (see checkout()).
 async function seedCustomerProfileDetails(customers: { id: number }[]) {
   const profiles = [
     {
@@ -1242,6 +1241,72 @@ async function seedCustomerProfileDetails(customers: { id: number }[]) {
         state: profile.state,
         postalCode: profile.postalCode,
         country: profile.country,
+      },
+    });
+  }
+}
+
+const BULK_FIRST_NAMES = [
+  "James", "Mary", "Robert", "Patricia", "John", "Jennifer", "Michael", "Linda", "David", "Elizabeth",
+  "William", "Barbara", "Richard", "Susan", "Joseph", "Jessica", "Thomas", "Sarah", "Charles", "Karen",
+  "Daniel", "Nancy", "Matthew", "Lisa", "Anthony", "Betty", "Mark", "Margaret", "Paul", "Sandra",
+  "Steven", "Ashley", "Andrew", "Kimberly", "Kenneth", "Emily", "Joshua", "Donna", "George", "Michelle",
+];
+const BULK_LAST_NAMES = [
+  "Smith", "Johnson", "Williams", "Brown", "Jones", "Garcia", "Miller", "Davis", "Rodriguez", "Martinez",
+  "Hernandez", "Lopez", "Gonzalez", "Wilson", "Anderson", "Thomas", "Taylor", "Moore", "Jackson", "Martin",
+  "Lee", "Perez", "Thompson", "White", "Harris", "Sanchez", "Clark", "Ramirez", "Lewis", "Robinson",
+];
+const BULK_CITIES: { city: string; state: string; country: string }[] = [
+  { city: "Springfield", state: "IL", country: "United States" },
+  { city: "Miami", state: "FL", country: "United States" },
+  { city: "Seattle", state: "WA", country: "United States" },
+  { city: "Austin", state: "TX", country: "United States" },
+  { city: "Portland", state: "OR", country: "United States" },
+  { city: "Denver", state: "CO", country: "United States" },
+  { city: "Phoenix", state: "AZ", country: "United States" },
+  { city: "Boston", state: "MA", country: "United States" },
+  { city: "Nashville", state: "TN", country: "United States" },
+  { city: "Minneapolis", state: "MN", country: "United States" },
+];
+const BULK_STREET_NAMES = [
+  "Baker Street", "Ocean Drive", "Pine Ave", "Elm Court", "Maple Lane", "Cedar Road", "Birch Way",
+  "Willow Street", "Sunset Blvd", "Highland Ave",
+];
+
+// Algorithmic version of seedCustomerProfileDetails for the
+// BULK_CUSTOMER_COUNT customers — deterministic via the same mulberry32
+// PRNG the bulk order generator already uses (see seedBulkOrders), so a
+// reseed always produces the same names/addresses rather than a fresh
+// random set every time. Not meant to be individually "realistic" the way
+// the 12 curated profiles are (area codes aren't matched to the assigned
+// city, for instance) — just enough variety that 168 rows don't look like
+// a single templated stamp when scrolling the Customers list.
+async function seedBulkCustomerProfiles(bulkCustomers: { id: number }[]) {
+  const existing = await prisma.user.findUnique({ where: { id: bulkCustomers[0]?.id }, select: { name: true } });
+  if (!bulkCustomers[0] || existing?.name) return; // idempotent — only fill in once
+
+  const rand = mulberry32(20260901 + 1); // distinct seed from backfillCardMetadata's, still reproducible
+  for (const customer of bulkCustomers) {
+    const first = BULK_FIRST_NAMES[Math.floor(rand() * BULK_FIRST_NAMES.length)];
+    const last = BULK_LAST_NAMES[Math.floor(rand() * BULK_LAST_NAMES.length)];
+    const location = BULK_CITIES[Math.floor(rand() * BULK_CITIES.length)];
+    const streetNumber = Math.floor(rand() * 9800) + 100;
+    const streetName = BULK_STREET_NAMES[Math.floor(rand() * BULK_STREET_NAMES.length)];
+    const areaCode = 200 + Math.floor(rand() * 700);
+    const phoneLine = String(Math.floor(rand() * 10000)).padStart(4, "0");
+    const postalCode = String(10000 + Math.floor(rand() * 89999));
+
+    await prisma.user.update({
+      where: { id: customer.id },
+      data: {
+        name: `${first} ${last}`,
+        phone: `+1 ${areaCode}-555-${phoneLine}`,
+        addressLine1: `${streetNumber} ${streetName}`,
+        city: location.city,
+        state: location.state,
+        postalCode,
+        country: location.country,
       },
     });
   }
@@ -1959,6 +2024,7 @@ export async function runSeed(): Promise<string> {
   const customers = await seedCustomers();
   const bulkCustomers = await seedBulkCustomers();
   await seedCustomerProfileDetails(customers);
+  await seedBulkCustomerProfiles(bulkCustomers);
   const variantsBySku = await seedCatalog();
   await seedOrders(customers, variantsBySku);
   await seedCartLeadExample(customers, variantsBySku);
@@ -1984,8 +2050,9 @@ export async function runSeed(): Promise<string> {
     `(${BULK_ORDER_COUNT} bulk-generated over the past 12 months, 3 hand-crafted refund examples, 3 return-request ` +
     `examples covering pending/approved/rejected, and ${ORDERS.length} curated demo orders), 4 order notes, ` +
     `13 product reviews spanning the catalog (published immediately, mixed ratings, one obvious spam ` +
-    `example demonstrating the delete flow), 6 product questions covering unanswered/answered, ${CUSTOMER_COUNT} ` +
-    `customers with full profile detail (name/phone/address), demo card metadata backfilled onto every ` +
-    `card-paid completed order, 1 cart-interest lead example, and enabled partial refunds in store settings.`
+    `example demonstrating the delete flow), 6 product questions covering unanswered/answered, all ` +
+    `${totalCustomers} customers with full profile detail (name/phone/address — ${CUSTOMER_COUNT} hand-picked, ` +
+    `${bulkCustomers.length} algorithmically generated), demo card metadata backfilled onto every card-paid ` +
+    `completed order, 1 cart-interest lead example, and enabled partial refunds in store settings.`
   );
 }
