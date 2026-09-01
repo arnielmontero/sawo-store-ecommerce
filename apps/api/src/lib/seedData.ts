@@ -89,6 +89,11 @@ const CATEGORIES = [
   { name: "Benches & Backrests", slug: "benches-backrests" },
   { name: "Doors & Glass", slug: "doors-glass" },
   { name: "Lighting & Accessories", slug: "lighting-accessories" },
+  // Deliberately has no products in PRODUCTS below — gives the Categories
+  // panel (Catalog -> "Categories") a ready example of a deletable category
+  // to test against, alongside the others which are all correctly
+  // delete-blocked by having products assigned.
+  { name: "Replacement Parts", slug: "replacement-parts" },
 ];
 
 const PRODUCTS: ProductSeed[] = [
