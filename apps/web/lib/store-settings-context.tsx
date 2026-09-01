@@ -27,9 +27,13 @@ export function StoreSettingsProvider({ children }: { children: ReactNode }) {
           logoUrl: null,
           allowPartialRefunds: false,
           defaultCarrier: "USPS",
-          stripeSecretKeySet: false,
-          stripeWebhookSecretSet: false,
-          easypostApiKeySet: false,
+          apiEnvironment: "SANDBOX",
+          stripeSecretKeyTestSet: false,
+          stripeWebhookSecretTestSet: false,
+          easypostApiKeyTestSet: false,
+          stripeSecretKeyLiveSet: false,
+          stripeWebhookSecretLiveSet: false,
+          easypostApiKeyLiveSet: false,
         })
       );
   }, [user]);

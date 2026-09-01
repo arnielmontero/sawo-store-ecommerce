@@ -262,8 +262,20 @@ export default function OrderDetailPage() {
 
       {order.shippingAddress && (
         <div className="mt-6 rounded-xl border border-ink-100 bg-white p-5">
-          <p className="text-xs uppercase tracking-wide text-ink-500">Shipping address</p>
-          <p className="mt-1 whitespace-pre-line text-sm text-ink-900">{order.shippingAddress}</p>
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <p className="text-xs uppercase tracking-wide text-ink-500">Shipping address</p>
+              <p className="mt-1 whitespace-pre-line text-sm text-ink-900">{order.shippingAddress}</p>
+            </div>
+            {(order.shippingCountry || order.carrier) && (
+              <div className="shrink-0 text-right">
+                {order.shippingCountry && (
+                  <p className="text-xs uppercase tracking-wide text-ink-500">{order.shippingCountry}</p>
+                )}
+                {order.carrier && <p className="mt-1 text-sm text-ink-900">{order.carrier}</p>}
+              </div>
+            )}
+          </div>
         </div>
       )}
 

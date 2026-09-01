@@ -7,7 +7,8 @@ import {
   removeStoreLogo,
   setAllowPartialRefunds,
   setDefaultCarrier,
-  setSandboxCredentials,
+  setApiCredentials,
+  setApiEnvironment,
   fetchCarrierRules,
   upsertCarrierRule,
   deleteCarrierRule,
@@ -18,9 +19,11 @@ import {
   type CarrierRule,
   type PaymentMethodRule,
   type PaymentMethod,
+  type ApiEnvironment,
 } from "@/lib/api";
 import { useStoreSettings } from "@/lib/store-settings-context";
 import { useAuth } from "@/lib/auth-context";
+import { COUNTRIES } from "@/lib/countries";
 
 // Well-known carrier codes EasyPost recognizes for tracker/rate matching —
 // not exhaustive, just the common ones staff are likely to actually assign.
@@ -46,17 +49,24 @@ export default function ConfigurationPage() {
   const [refundsError, setRefundsError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const [stripeSecretKeyInput, setStripeSecretKeyInput] = useState("");
-  const [stripeWebhookSecretInput, setStripeWebhookSecretInput] = useState("");
-  const [easypostApiKeyInput, setEasypostApiKeyInput] = useState("");
+  const [credentialTab, setCredentialTab] = useState<ApiEnvironment>("SANDBOX");
+  const [stripeSecretKeyTestInput, setStripeSecretKeyTestInput] = useState("");
+  const [stripeWebhookSecretTestInput, setStripeWebhookSecretTestInput] = useState("");
+  const [easypostApiKeyTestInput, setEasypostApiKeyTestInput] = useState("");
+  const [stripeSecretKeyLiveInput, setStripeSecretKeyLiveInput] = useState("");
+  const [stripeWebhookSecretLiveInput, setStripeWebhookSecretLiveInput] = useState("");
+  const [easypostApiKeyLiveInput, setEasypostApiKeyLiveInput] = useState("");
   const [credentialsSaving, setCredentialsSaving] = useState(false);
   const [credentialsError, setCredentialsError] = useState<string | null>(null);
   const [credentialsSaved, setCredentialsSaved] = useState(false);
+  const [environmentSwitching, setEnvironmentSwitching] = useState(false);
+  const [environmentError, setEnvironmentError] = useState<string | null>(null);
+  const [pendingProductionConfirm, setPendingProductionConfirm] = useState(false);
 
   const [carrierRules, setCarrierRules] = useState<CarrierRule[]>([]);
   const [rulesLoading, setRulesLoading] = useState(true);
   const [defaultCarrierSaving, setDefaultCarrierSaving] = useState(false);
-  const [ruleCountry, setRuleCountry] = useState("");
+  const [ruleCountry, setRuleCountry] = useState(COUNTRIES[0].code);
   const [ruleCarrier, setRuleCarrier] = useState(CARRIER_OPTIONS[0]);
   const [ruleSaving, setRuleSaving] = useState(false);
   const [ruleError, setRuleError] = useState<string | null>(null);
@@ -70,7 +80,7 @@ export default function ConfigurationPage() {
 
   const [paymentRules, setPaymentRules] = useState<PaymentMethodRule[]>([]);
   const [paymentRulesLoading, setPaymentRulesLoading] = useState(true);
-  const [paymentRuleCountry, setPaymentRuleCountry] = useState("");
+  const [paymentRuleCountry, setPaymentRuleCountry] = useState(COUNTRIES[0].code);
   const [paymentRuleMethods, setPaymentRuleMethods] = useState<PaymentMethod[]>([]);
   const [paymentRuleSaving, setPaymentRuleSaving] = useState(false);
   const [paymentRuleError, setPaymentRuleError] = useState<string | null>(null);
@@ -165,26 +175,49 @@ export default function ConfigurationPage() {
   async function handleSaveCredentials() {
     setCredentialsError(null);
     setCredentialsSaved(false);
-    const input: { stripeSecretKey?: string; stripeWebhookSecret?: string; easypostApiKey?: string } = {};
-    if (stripeSecretKeyInput.trim()) input.stripeSecretKey = stripeSecretKeyInput.trim();
-    if (stripeWebhookSecretInput.trim()) input.stripeWebhookSecret = stripeWebhookSecretInput.trim();
-    if (easypostApiKeyInput.trim()) input.easypostApiKey = easypostApiKeyInput.trim();
+    const input: Parameters<typeof setApiCredentials>[0] = {};
+    if (credentialTab === "SANDBOX") {
+      if (stripeSecretKeyTestInput.trim()) input.stripeSecretKeyTest = stripeSecretKeyTestInput.trim();
+      if (stripeWebhookSecretTestInput.trim()) input.stripeWebhookSecretTest = stripeWebhookSecretTestInput.trim();
+      if (easypostApiKeyTestInput.trim()) input.easypostApiKeyTest = easypostApiKeyTestInput.trim();
+    } else {
+      if (stripeSecretKeyLiveInput.trim()) input.stripeSecretKeyLive = stripeSecretKeyLiveInput.trim();
+      if (stripeWebhookSecretLiveInput.trim()) input.stripeWebhookSecretLive = stripeWebhookSecretLiveInput.trim();
+      if (easypostApiKeyLiveInput.trim()) input.easypostApiKeyLive = easypostApiKeyLiveInput.trim();
+    }
     if (Object.keys(input).length === 0) {
       setCredentialsError("Enter at least one key to save.");
       return;
     }
     setCredentialsSaving(true);
     try {
-      const updated = await setSandboxCredentials(input);
+      const updated = await setApiCredentials(input);
       setSettings(updated);
-      setStripeSecretKeyInput("");
-      setStripeWebhookSecretInput("");
-      setEasypostApiKeyInput("");
+      setStripeSecretKeyTestInput("");
+      setStripeWebhookSecretTestInput("");
+      setEasypostApiKeyTestInput("");
+      setStripeSecretKeyLiveInput("");
+      setStripeWebhookSecretLiveInput("");
+      setEasypostApiKeyLiveInput("");
       setCredentialsSaved(true);
     } catch (err) {
       setCredentialsError(err instanceof Error ? err.message : "Failed to save credentials.");
     } finally {
       setCredentialsSaving(false);
+    }
+  }
+
+  async function handleSwitchEnvironment(next: ApiEnvironment) {
+    setEnvironmentError(null);
+    setEnvironmentSwitching(true);
+    try {
+      const updated = await setApiEnvironment(next);
+      setSettings(updated);
+      setPendingProductionConfirm(false);
+    } catch (err) {
+      setEnvironmentError(err instanceof Error ? err.message : "Failed to switch environment.");
+    } finally {
+      setEnvironmentSwitching(false);
     }
   }
 
@@ -202,16 +235,10 @@ export default function ConfigurationPage() {
 
   async function handleAddRule() {
     setRuleError(null);
-    const country = ruleCountry.trim().toUpperCase();
-    if (country.length !== 2) {
-      setRuleError("Enter a 2-letter country code (e.g. US, DE).");
-      return;
-    }
     setRuleSaving(true);
     try {
-      const rule = await upsertCarrierRule(country, ruleCarrier);
+      const rule = await upsertCarrierRule(ruleCountry, ruleCarrier);
       setCarrierRules((prev) => [...prev.filter((r) => r.country !== rule.country), rule].sort((a, b) => a.country.localeCompare(b.country)));
-      setRuleCountry("");
     } catch (err) {
       setRuleError(err instanceof Error ? err.message : "Failed to save rule.");
     } finally {
@@ -237,20 +264,14 @@ export default function ConfigurationPage() {
 
   async function handleAddPaymentRule() {
     setPaymentRuleError(null);
-    const country = paymentRuleCountry.trim().toUpperCase();
-    if (country.length !== 2) {
-      setPaymentRuleError("Enter a 2-letter country code (e.g. US, DE).");
-      return;
-    }
     if (paymentRuleMethods.length === 0) {
       setPaymentRuleError("Select at least one accepted payment method.");
       return;
     }
     setPaymentRuleSaving(true);
     try {
-      const updated = await setPaymentMethodRules(country, paymentRuleMethods);
-      setPaymentRules((prev) => [...prev.filter((r) => r.country !== country), ...updated]);
-      setPaymentRuleCountry("");
+      const updated = await setPaymentMethodRules(paymentRuleCountry, paymentRuleMethods);
+      setPaymentRules((prev) => [...prev.filter((r) => r.country !== paymentRuleCountry), ...updated]);
       setPaymentRuleMethods([]);
     } catch (err) {
       setPaymentRuleError(err instanceof Error ? err.message : "Failed to save rule.");
@@ -422,59 +443,200 @@ export default function ConfigurationPage() {
       </div>
 
       <div className="mt-6 max-w-xl rounded-xl border border-ink-100 bg-white p-6">
-        <p className="text-sm font-medium text-ink-900">Sandbox API credentials</p>
-        <p className="mt-1 text-xs text-ink-400">
-          Test-mode keys for external integrations. Saved here they take priority over the server&apos;s .env file
-          and apply immediately, no restart needed. Once set, a key is never shown again — only whether one is
-          configured.
-        </p>
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <p className="text-sm font-medium text-ink-900">API credentials</p>
+            <p className="mt-1 text-xs text-ink-400">
+              Stripe and EasyPost keys for this store. Saved here they take priority over the server&apos;s .env file
+              and apply immediately, no restart needed. Once set, a key is never shown again — only whether one is
+              configured.
+            </p>
+          </div>
+          <span
+            className={`shrink-0 rounded-full px-2.5 py-1 text-xs font-semibold ${
+              settings?.apiEnvironment === "PRODUCTION"
+                ? "bg-red-50 text-red-700"
+                : "bg-emerald-50 text-emerald-700"
+            }`}
+          >
+            {settings?.apiEnvironment === "PRODUCTION" ? "Live" : "Sandbox"}
+          </span>
+        </div>
+
+        {canEdit && (
+          <div className="mt-4 flex items-center justify-between gap-4 rounded-lg border border-ink-100 bg-gray-50 px-4 py-3">
+            <div>
+              <p className="text-sm font-medium text-ink-900">Environment</p>
+              <p className="mt-0.5 text-xs text-ink-400">
+                Which key pair below is actually used. Switching to Production makes Stripe charges and EasyPost
+                trackers real.
+              </p>
+            </div>
+            <div className="flex shrink-0 gap-1 rounded-md border border-ink-100 bg-white p-1">
+              <button
+                onClick={() => handleSwitchEnvironment("SANDBOX")}
+                disabled={environmentSwitching}
+                className={`rounded px-3 py-1.5 text-xs font-semibold transition disabled:opacity-50 ${
+                  settings?.apiEnvironment !== "PRODUCTION" ? "bg-emerald-500 text-white" : "text-ink-500 hover:bg-gray-50"
+                }`}
+              >
+                Sandbox
+              </button>
+              <button
+                onClick={() => (settings?.apiEnvironment === "PRODUCTION" ? undefined : setPendingProductionConfirm(true))}
+                disabled={environmentSwitching}
+                className={`rounded px-3 py-1.5 text-xs font-semibold transition disabled:opacity-50 ${
+                  settings?.apiEnvironment === "PRODUCTION" ? "bg-red-600 text-white" : "text-ink-500 hover:bg-gray-50"
+                }`}
+              >
+                Production
+              </button>
+            </div>
+          </div>
+        )}
+        {environmentError && <p className="mt-2 text-sm text-brand-600">{environmentError}</p>}
+
+        {pendingProductionConfirm && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
+            <div className="w-full max-w-sm rounded-xl bg-white p-6 shadow-xl">
+              <p className="text-sm font-semibold text-ink-900">Switch to Production?</p>
+              <p className="mt-2 text-sm text-ink-600">
+                From this point on, Stripe payment intents and refunds will be real charges, and EasyPost trackers
+                will be real shipments — using the Live keys below, not the Sandbox ones.
+              </p>
+              <div className="mt-5 flex justify-end gap-2">
+                <button
+                  onClick={() => setPendingProductionConfirm(false)}
+                  disabled={environmentSwitching}
+                  className="rounded-md border border-ink-100 px-3 py-1.5 text-sm font-medium text-ink-700 hover:bg-gray-50 disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={() => handleSwitchEnvironment("PRODUCTION")}
+                  disabled={environmentSwitching}
+                  className="rounded-md bg-red-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-50"
+                >
+                  {environmentSwitching ? "Switching..." : "Switch to Production"}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        <div className="mt-5 flex gap-1 border-b border-ink-100">
+          <button
+            onClick={() => setCredentialTab("SANDBOX")}
+            className={`border-b-2 px-3 py-2 text-sm font-medium ${
+              credentialTab === "SANDBOX" ? "border-brand-500 text-brand-600" : "border-transparent text-ink-500 hover:text-ink-700"
+            }`}
+          >
+            Sandbox keys
+          </button>
+          <button
+            onClick={() => setCredentialTab("PRODUCTION")}
+            className={`border-b-2 px-3 py-2 text-sm font-medium ${
+              credentialTab === "PRODUCTION" ? "border-brand-500 text-brand-600" : "border-transparent text-ink-500 hover:text-ink-700"
+            }`}
+          >
+            Live keys
+          </button>
+        </div>
 
         {canEdit ? (
           <div className="mt-4 space-y-4">
-            <div>
-              <label className="block text-xs font-medium uppercase tracking-wide text-ink-500">
-                Stripe secret key {settings?.stripeSecretKeySet && <span className="text-emerald-600">(configured)</span>}
-              </label>
-              <input
-                type="password"
-                value={stripeSecretKeyInput}
-                onChange={(e) => setStripeSecretKeyInput(e.target.value)}
-                placeholder={settings?.stripeSecretKeySet ? "•••••••••••••••• (leave blank to keep)" : "sk_test_..."}
-                className="mt-1 w-full rounded-md border border-ink-100 px-3 py-2 text-sm font-mono outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-medium uppercase tracking-wide text-ink-500">
-                Stripe webhook secret{" "}
-                {settings?.stripeWebhookSecretSet && <span className="text-emerald-600">(configured)</span>}
-              </label>
-              <input
-                type="password"
-                value={stripeWebhookSecretInput}
-                onChange={(e) => setStripeWebhookSecretInput(e.target.value)}
-                placeholder={settings?.stripeWebhookSecretSet ? "•••••••••••••••• (leave blank to keep)" : "whsec_..."}
-                className="mt-1 w-full rounded-md border border-ink-100 px-3 py-2 text-sm font-mono outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-medium uppercase tracking-wide text-ink-500">
-                EasyPost API key {settings?.easypostApiKeySet && <span className="text-emerald-600">(configured)</span>}
-              </label>
-              <p className="mt-1 text-xs text-ink-400">
-                Powers live shipment tracking on Deliveries. Free test key from{" "}
-                <a href="https://www.easypost.com/" target="_blank" rel="noreferrer" className="text-brand-600 hover:underline">
-                  easypost.com
-                </a>{" "}
-                — dashboard → API Keys → Test API Key.
-              </p>
-              <input
-                type="password"
-                value={easypostApiKeyInput}
-                onChange={(e) => setEasypostApiKeyInput(e.target.value)}
-                placeholder={settings?.easypostApiKeySet ? "•••••••••••••••• (leave blank to keep)" : "EZTK..."}
-                className="mt-1 w-full rounded-md border border-ink-100 px-3 py-2 text-sm font-mono outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
-              />
-            </div>
+            {credentialTab === "SANDBOX" ? (
+              <>
+                <div>
+                  <label className="block text-xs font-medium uppercase tracking-wide text-ink-500">
+                    Stripe secret key (test){" "}
+                    {settings?.stripeSecretKeyTestSet && <span className="text-emerald-600">(configured)</span>}
+                  </label>
+                  <input
+                    type="password"
+                    value={stripeSecretKeyTestInput}
+                    onChange={(e) => setStripeSecretKeyTestInput(e.target.value)}
+                    placeholder={settings?.stripeSecretKeyTestSet ? "•••••••••••••••• (leave blank to keep)" : "sk_test_..."}
+                    className="mt-1 w-full rounded-md border border-ink-100 px-3 py-2 text-sm font-mono outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium uppercase tracking-wide text-ink-500">
+                    Stripe webhook secret (test){" "}
+                    {settings?.stripeWebhookSecretTestSet && <span className="text-emerald-600">(configured)</span>}
+                  </label>
+                  <input
+                    type="password"
+                    value={stripeWebhookSecretTestInput}
+                    onChange={(e) => setStripeWebhookSecretTestInput(e.target.value)}
+                    placeholder={settings?.stripeWebhookSecretTestSet ? "•••••••••••••••• (leave blank to keep)" : "whsec_..."}
+                    className="mt-1 w-full rounded-md border border-ink-100 px-3 py-2 text-sm font-mono outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium uppercase tracking-wide text-ink-500">
+                    EasyPost API key (test){" "}
+                    {settings?.easypostApiKeyTestSet && <span className="text-emerald-600">(configured)</span>}
+                  </label>
+                  <p className="mt-1 text-xs text-ink-400">
+                    Powers live shipment tracking on Deliveries. Free test key from{" "}
+                    <a href="https://www.easypost.com/" target="_blank" rel="noreferrer" className="text-brand-600 hover:underline">
+                      easypost.com
+                    </a>{" "}
+                    — dashboard → API Keys → Test API Key.
+                  </p>
+                  <input
+                    type="password"
+                    value={easypostApiKeyTestInput}
+                    onChange={(e) => setEasypostApiKeyTestInput(e.target.value)}
+                    placeholder={settings?.easypostApiKeyTestSet ? "•••••••••••••••• (leave blank to keep)" : "EZTK..."}
+                    className="mt-1 w-full rounded-md border border-ink-100 px-3 py-2 text-sm font-mono outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
+                  />
+                </div>
+              </>
+            ) : (
+              <>
+                <div>
+                  <label className="block text-xs font-medium uppercase tracking-wide text-ink-500">
+                    Stripe secret key (live){" "}
+                    {settings?.stripeSecretKeyLiveSet && <span className="text-emerald-600">(configured)</span>}
+                  </label>
+                  <input
+                    type="password"
+                    value={stripeSecretKeyLiveInput}
+                    onChange={(e) => setStripeSecretKeyLiveInput(e.target.value)}
+                    placeholder={settings?.stripeSecretKeyLiveSet ? "•••••••••••••••• (leave blank to keep)" : "sk_live_..."}
+                    className="mt-1 w-full rounded-md border border-ink-100 px-3 py-2 text-sm font-mono outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium uppercase tracking-wide text-ink-500">
+                    Stripe webhook secret (live){" "}
+                    {settings?.stripeWebhookSecretLiveSet && <span className="text-emerald-600">(configured)</span>}
+                  </label>
+                  <input
+                    type="password"
+                    value={stripeWebhookSecretLiveInput}
+                    onChange={(e) => setStripeWebhookSecretLiveInput(e.target.value)}
+                    placeholder={settings?.stripeWebhookSecretLiveSet ? "•••••••••••••••• (leave blank to keep)" : "whsec_..."}
+                    className="mt-1 w-full rounded-md border border-ink-100 px-3 py-2 text-sm font-mono outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium uppercase tracking-wide text-ink-500">
+                    EasyPost API key (live){" "}
+                    {settings?.easypostApiKeyLiveSet && <span className="text-emerald-600">(configured)</span>}
+                  </label>
+                  <input
+                    type="password"
+                    value={easypostApiKeyLiveInput}
+                    onChange={(e) => setEasypostApiKeyLiveInput(e.target.value)}
+                    placeholder={settings?.easypostApiKeyLiveSet ? "•••••••••••••••• (leave blank to keep)" : "EZAK..."}
+                    className="mt-1 w-full rounded-md border border-ink-100 px-3 py-2 text-sm font-mono outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
+                  />
+                </div>
+              </>
+            )}
 
             {credentialsError && <p className="text-sm text-brand-600">{credentialsError}</p>}
             {credentialsSaved && !credentialsError && <p className="text-sm text-emerald-600">Saved.</p>}
@@ -484,11 +646,11 @@ export default function ConfigurationPage() {
               disabled={credentialsSaving}
               className="rounded-md bg-brand-500 px-4 py-2 text-sm font-medium text-white hover:bg-brand-600 disabled:opacity-50"
             >
-              {credentialsSaving ? "Saving..." : "Save credentials"}
+              {credentialsSaving ? "Saving..." : `Save ${credentialTab === "SANDBOX" ? "sandbox" : "live"} keys`}
             </button>
           </div>
         ) : (
-          <p className="mt-4 text-xs text-ink-400">Only Admin users can change sandbox credentials.</p>
+          <p className="mt-4 text-xs text-ink-400">Only Admin users can change API credentials.</p>
         )}
       </div>
 
@@ -561,12 +723,17 @@ export default function ConfigurationPage() {
             <div className="mt-4 flex items-end gap-2">
               <div>
                 <label className="block text-xs font-medium uppercase tracking-wide text-ink-500">Country</label>
-                <input
+                <select
                   value={ruleCountry}
-                  onChange={(e) => setRuleCountry(e.target.value.slice(0, 2))}
-                  placeholder="US"
-                  className="mt-1 w-20 rounded-md border border-ink-100 px-3 py-1.5 text-sm uppercase outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
-                />
+                  onChange={(e) => setRuleCountry(e.target.value)}
+                  className="mt-1 w-44 rounded-md border border-ink-100 px-3 py-1.5 text-sm outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
+                >
+                  {COUNTRIES.map((c) => (
+                    <option key={c.code} value={c.code}>
+                      {c.name}
+                    </option>
+                  ))}
+                </select>
               </div>
               <div>
                 <label className="block text-xs font-medium uppercase tracking-wide text-ink-500">Carrier</label>
@@ -645,12 +812,17 @@ export default function ConfigurationPage() {
             <div className="flex items-end gap-2">
               <div>
                 <label className="block text-xs font-medium uppercase tracking-wide text-ink-500">Country</label>
-                <input
+                <select
                   value={paymentRuleCountry}
-                  onChange={(e) => setPaymentRuleCountry(e.target.value.slice(0, 2))}
-                  placeholder="US"
-                  className="mt-1 w-20 rounded-md border border-ink-100 px-3 py-1.5 text-sm uppercase outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
-                />
+                  onChange={(e) => setPaymentRuleCountry(e.target.value)}
+                  className="mt-1 w-44 rounded-md border border-ink-100 px-3 py-1.5 text-sm outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
+                >
+                  {COUNTRIES.map((c) => (
+                    <option key={c.code} value={c.code}>
+                      {c.name}
+                    </option>
+                  ))}
+                </select>
               </div>
             </div>
             <div className="mt-3 flex flex-wrap gap-3">

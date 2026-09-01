@@ -1,6 +1,6 @@
 import { Router, type Request, type Response, type NextFunction } from "express";
 import { z } from "zod";
-import { AdminRole } from "@prisma/client";
+import { AdminRole, ApiEnvironment } from "@prisma/client";
 import { requireAuth, requireRole } from "../middleware/requireAuth";
 import { HttpError } from "../middleware/errorHandler";
 import { upload } from "../lib/upload";
@@ -26,20 +26,35 @@ const updateSettingsSchema = z.object({
   logoUrl: z.string().url().nullable().optional(),
   allowPartialRefunds: z.boolean().optional(),
   defaultCarrier: z.string().min(1).max(40).optional(),
-  // Sandbox/test API credentials — see lib/credentials.ts. Trimmed and
-  // treated as "leave unchanged" when empty, so re-saving the form without
-  // touching a key field never blanks out what was already stored (the
-  // frontend never has the real value to send back, only whether it's set —
-  // see settings.service.ts's getStoreSettings).
-  stripeSecretKey: z.string().max(500).optional(),
-  stripeWebhookSecret: z.string().max(500).optional(),
-  easypostApiKey: z.string().max(500).optional(),
+  // Which credential pair is actually live — see lib/credentials.ts.
+  // Switching TO production is intentionally not a plain field flip: see
+  // the explicit confirm check below, since it changes whether Stripe
+  // charges/EasyPost trackers are real.
+  apiEnvironment: z.nativeEnum(ApiEnvironment).optional(),
+  confirmProduction: z.literal("LIVE").optional(),
+  // Sandbox/test and live API credentials — see lib/credentials.ts.
+  // Trimmed and treated as "leave unchanged" when empty, so re-saving the
+  // form without touching a key field never blanks out what was already
+  // stored (the frontend never has the real value to send back, only
+  // whether it's set — see settings.service.ts's getStoreSettings).
+  stripeSecretKeyTest: z.string().max(500).optional(),
+  stripeWebhookSecretTest: z.string().max(500).optional(),
+  easypostApiKeyTest: z.string().max(500).optional(),
+  stripeSecretKeyLive: z.string().max(500).optional(),
+  stripeWebhookSecretLive: z.string().max(500).optional(),
+  easypostApiKeyLive: z.string().max(500).optional(),
 });
 
 settingsRouter.patch("/", requireRole(AdminRole.ADMIN), async (req, res, next) => {
   try {
-    const input = updateSettingsSchema.parse(req.body);
-    const settings = await updateStoreSettings(input);
+    const parsedBody = updateSettingsSchema.parse(req.body);
+    if (parsedBody.apiEnvironment === ApiEnvironment.PRODUCTION && parsedBody.confirmProduction !== "LIVE") {
+      throw new HttpError(
+        400,
+        'Switching to Production requires confirmProduction: "LIVE" — this makes Stripe charges and EasyPost trackers real.'
+      );
+    }
+    const settings = await updateStoreSettings(parsedBody);
     res.json({ settings });
   } catch (err) {
     next(err);

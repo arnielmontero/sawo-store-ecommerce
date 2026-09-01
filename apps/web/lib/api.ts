@@ -349,6 +349,8 @@ export interface OrderDetail {
   totalCents: number;
   currency: string;
   shippingAddress: string | null;
+  shippingCountry: string | null;
+  carrier: string | null;
   isNewClient: boolean;
   trackingNumber: string | null;
   stripePaymentIntentId: string | null;
@@ -863,17 +865,25 @@ export async function refundPayment(
   return data.order;
 }
 
+export type ApiEnvironment = "SANDBOX" | "PRODUCTION";
+
 export interface StoreSettings {
   storeName: string;
   logoUrl: string | null;
   allowPartialRefunds: boolean;
   defaultCarrier: string;
-  // Whether each sandbox credential is configured (DB or .env) — the real
-  // secret value never travels to the browser, see settings.service.ts's
-  // getStoreSettings.
-  stripeSecretKeySet: boolean;
-  stripeWebhookSecretSet: boolean;
-  easypostApiKeySet: boolean;
+  // Which credential pair below is actually used to build the
+  // Stripe/EasyPost clients — see lib/credentials.ts on the server.
+  apiEnvironment: ApiEnvironment;
+  // Whether each credential is configured (DB, or .env for the Test ones
+  // only) — the real secret value never travels to the browser, see
+  // settings.service.ts's getStoreSettings.
+  stripeSecretKeyTestSet: boolean;
+  stripeWebhookSecretTestSet: boolean;
+  easypostApiKeyTestSet: boolean;
+  stripeSecretKeyLiveSet: boolean;
+  stripeWebhookSecretLiveSet: boolean;
+  easypostApiKeyLiveSet: boolean;
 }
 
 export async function fetchStoreSettings(): Promise<StoreSettings> {
@@ -908,14 +918,32 @@ export async function setDefaultCarrier(defaultCarrier: string): Promise<StoreSe
 // Any field left blank is left unchanged server-side — see
 // settings.service.ts's updateStoreSettings. Pass only the keys actually
 // being changed.
-export async function setSandboxCredentials(input: {
-  stripeSecretKey?: string;
-  stripeWebhookSecret?: string;
-  easypostApiKey?: string;
+export async function setApiCredentials(input: {
+  stripeSecretKeyTest?: string;
+  stripeWebhookSecretTest?: string;
+  easypostApiKeyTest?: string;
+  stripeSecretKeyLive?: string;
+  stripeWebhookSecretLive?: string;
+  easypostApiKeyLive?: string;
 }): Promise<StoreSettings> {
   const data = await apiFetch("/api/v1/settings", {
     method: "PATCH",
     body: JSON.stringify(input),
+  });
+  return data.settings;
+}
+
+// Switching TO production requires the literal confirm phrase — see
+// settings.routes.ts, which rejects a PRODUCTION switch without it. This
+// makes Stripe charges and EasyPost trackers real, so it's not a plain
+// field flip like the other settings here.
+export async function setApiEnvironment(environment: ApiEnvironment): Promise<StoreSettings> {
+  const data = await apiFetch("/api/v1/settings", {
+    method: "PATCH",
+    body: JSON.stringify({
+      apiEnvironment: environment,
+      ...(environment === "PRODUCTION" ? { confirmProduction: "LIVE" } : {}),
+    }),
   });
   return data.settings;
 }

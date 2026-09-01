@@ -670,6 +670,14 @@ model CartLeadItem {
 
 // ── Store settings ─────────────────────────────────────────────────────
 
+// Which credential pair (see StoreSettings below) is actually live —
+// SANDBOX uses the *Test fields (and falls back to .env), PRODUCTION uses
+// the *Live fields. See lib/credentials.ts.
+enum ApiEnvironment {
+  SANDBOX
+  PRODUCTION
+}
+
 // Singleton row (always id: 1) for store-wide admin-configurable values —
 // the Configuration page reads/writes this. Starts with just the store
 // name (shown in the Sidebar instead of a hardcoded string); add more
@@ -689,16 +697,26 @@ model StoreSettings {
   // Used when an order's shippingCountry has no matching CarrierRule.
   defaultCarrier      String   @default("USPS")
 
-  // Sandbox/test API credentials for external integrations, editable from
+  // Which pair of credentials below is actually used to build the
+  // Stripe/EasyPost clients — see lib/credentials.ts. SANDBOX by default so
+  // a fresh install never accidentally fires a real charge/shipment before
+  // someone deliberately flips this.
+  apiEnvironment ApiEnvironment @default(SANDBOX)
+
+  // Test AND live credentials for external integrations, editable from
   // Configuration instead of the server's .env file — see
-  // lib/credentials.ts, which resolves these with an .env fallback so an
-  // existing deployment configured only via .env keeps working unchanged.
-  // Stored as plain text: these are TEST-mode secrets for a local admin
-  // tool, not production credentials — same trust boundary as the rest of
-  // this table (ADMIN-only write, see settings.routes.ts).
-  stripeSecretKey      String? @db.Text
-  stripeWebhookSecret  String? @db.Text
-  easypostApiKey       String? @db.Text
+  // lib/credentials.ts, which picks the pair matching apiEnvironment and
+  // falls back to .env (as the SANDBOX value) so an existing deployment
+  // configured only via .env keeps working unchanged. Stored as plain text:
+  // ADMIN-only write (see settings.routes.ts) is this table's only access
+  // control, same trust boundary as the rest of it — this is a backoffice
+  // tool, not a secrets vault.
+  stripeSecretKeyTest      String? @db.Text
+  stripeWebhookSecretTest  String? @db.Text
+  easypostApiKeyTest       String? @db.Text
+  stripeSecretKeyLive      String? @db.Text
+  stripeWebhookSecretLive  String? @db.Text
+  easypostApiKeyLive       String? @db.Text
 
   updatedAt DateTime @updatedAt
 }
