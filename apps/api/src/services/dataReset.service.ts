@@ -13,6 +13,12 @@ import { runSeed } from "../lib/seedData";
 // RefundRecord, RefundRecordItem, OrderNote, ProductVariant, Inventory,
 // ProductImage, and ProductTag.
 async function clearStoreData() {
+  // Notification.link/dedupeKey reference order/variant IDs by plain string,
+  // not a hard FK (see schema.prisma) — deleting orders/products without
+  // also clearing notifications would leave them pointing at IDs that no
+  // longer exist, or worse, silently point at a different order/variant
+  // once fresh rows reuse those IDs after reseeding.
+  await prisma.notification.deleteMany();
   await prisma.order.deleteMany();
   await prisma.product.deleteMany();
   await prisma.category.deleteMany();

@@ -156,11 +156,22 @@ export async function resolveStaleOrderNotifications(orderId: number) {
 
 const PAGE_SIZE = 20;
 
-export async function listNotifications(filters: { unreadOnly?: boolean; page?: number }) {
+export interface ListNotificationsFilters {
+  unreadOnly?: boolean;
+  // Defaults to false — the bell dropdown and the inbox's default view
+  // both only care about currently-open issues. The inbox page's "Show
+  // resolved" toggle is what sets this true to browse full history.
+  includeResolved?: boolean;
+  type?: NotificationType;
+  page?: number;
+}
+
+export async function listNotifications(filters: ListNotificationsFilters) {
   const page = filters.page && filters.page > 0 ? filters.page : 1;
   const where = {
-    resolvedAt: null,
+    ...(filters.includeResolved ? {} : { resolvedAt: null }),
     ...(filters.unreadOnly ? { isRead: false } : {}),
+    ...(filters.type ? { type: filters.type } : {}),
   };
 
   const [notifications, total, unreadCount] = await Promise.all([

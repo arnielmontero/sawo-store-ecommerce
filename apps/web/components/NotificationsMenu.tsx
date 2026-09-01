@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import {
   fetchNotifications,
   markAllNotificationsRead,
@@ -140,6 +141,13 @@ export function NotificationsMenu() {
                 </ul>
               )}
             </div>
+            <Link
+              href="/notifications"
+              onClick={() => setOpen(false)}
+              className="block border-t border-ink-100 px-4 py-2.5 text-center text-sm font-medium text-brand-600 hover:bg-gray-50"
+            >
+              See all notifications
+            </Link>
           </div>
         </>
       )}

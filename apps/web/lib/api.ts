@@ -855,9 +855,18 @@ export interface NotificationsPage {
   pagination: { page: number; pageSize: number; total: number; totalPages: number };
 }
 
-export async function fetchNotifications(params: { unreadOnly?: boolean; page?: number } = {}): Promise<NotificationsPage> {
+export async function fetchNotifications(
+  params: {
+    unreadOnly?: boolean;
+    includeResolved?: boolean;
+    type?: NotificationType;
+    page?: number;
+  } = {}
+): Promise<NotificationsPage> {
   const query = new URLSearchParams();
   if (params.unreadOnly) query.set("unreadOnly", "true");
+  if (params.includeResolved) query.set("includeResolved", "true");
+  if (params.type) query.set("type", params.type);
   if (params.page) query.set("page", String(params.page));
   const qs = query.toString();
   return apiFetch(`/api/v1/notifications${qs ? `?${qs}` : ""}`);

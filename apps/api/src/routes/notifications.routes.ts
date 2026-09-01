@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { z } from "zod";
+import { NotificationType } from "@prisma/client";
 import { requireAuth } from "../middleware/requireAuth";
 import { HttpError } from "../middleware/errorHandler";
 import {
@@ -15,6 +16,8 @@ notificationsRouter.use(requireAuth);
 
 const listQuerySchema = z.object({
   unreadOnly: z.coerce.boolean().optional(),
+  includeResolved: z.coerce.boolean().optional(),
+  type: z.nativeEnum(NotificationType).optional(),
   page: z.coerce.number().int().positive().optional(),
 });
 
@@ -23,9 +26,9 @@ const listQuerySchema = z.object({
 // since it only ever scans orders already in PENDING/SHIPPED.
 notificationsRouter.get("/", async (req, res, next) => {
   try {
-    const { unreadOnly, page } = listQuerySchema.parse(req.query);
+    const { unreadOnly, includeResolved, type, page } = listQuerySchema.parse(req.query);
     await checkForStaleOrders();
-    const result = await listNotifications({ unreadOnly, page });
+    const result = await listNotifications({ unreadOnly, includeResolved, type, page });
     res.json(result);
   } catch (err) {
     next(err);
