@@ -538,6 +538,13 @@ async function seedOrders(customers: { id: number }[], variantsBySku: Map<string
         trackingNumber: orderSeed.trackingNumber,
         createdAt,
         items: { create: items },
+        // Seed orders are created directly at their final status rather
+        // than progressing through checkout()/updateOrderStatus() like a
+        // real order would, so there's no real per-transition history to
+        // record — this single entry (dated at createdAt, the closest
+        // honest approximation) just keeps the Timeline UI from showing
+        // "No status history recorded" for every demo order.
+        statusHistory: { create: { status: orderSeed.status, changedAt: createdAt } },
       },
     });
   }

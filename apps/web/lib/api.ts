@@ -225,6 +225,7 @@ export interface OrderDetail {
   createdAt: string;
   user: { id: number; email: string } | null;
   items: OrderDetailItem[];
+  statusHistory: { id: number; status: OrderStatus; changedAt: string }[];
 }
 
 export interface Payment {
@@ -307,9 +308,40 @@ export async function fetchMe(): Promise<SessionUser> {
   return data.user;
 }
 
-export async function fetchOrders(): Promise<Order[]> {
-  const data = await apiFetch("/api/orders");
-  return data.orders;
+export interface OrderStatistics {
+  totalOrders: number;
+  totalRevenueCents: number;
+  avgOrderValueCents: number;
+  newClientCount: number;
+  countsByStatus: { status: OrderStatus; count: number }[];
+}
+
+export async function fetchOrderStatistics(): Promise<OrderStatistics> {
+  return apiFetch("/api/orders/statistics");
+}
+
+export interface OrdersPage {
+  orders: Order[];
+  pagination: { page: number; pageSize: number; total: number; totalPages: number };
+}
+
+export async function fetchOrders(
+  params: {
+    search?: string;
+    status?: OrderStatus;
+    dateFrom?: string;
+    dateTo?: string;
+    page?: number;
+  } = {}
+): Promise<OrdersPage> {
+  const query = new URLSearchParams();
+  if (params.search) query.set("search", params.search);
+  if (params.status) query.set("status", params.status);
+  if (params.dateFrom) query.set("dateFrom", params.dateFrom);
+  if (params.dateTo) query.set("dateTo", params.dateTo);
+  if (params.page) query.set("page", String(params.page));
+  const qs = query.toString();
+  return apiFetch(`/api/orders${qs ? `?${qs}` : ""}`);
 }
 
 export type ProductSortField = "name" | "price" | "stock" | "createdAt";

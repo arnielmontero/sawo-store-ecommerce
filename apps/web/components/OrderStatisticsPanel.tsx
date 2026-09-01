@@ -1,31 +1,18 @@
 "use client";
 
-import type { Order, OrderStatus } from "@/lib/api";
+import { useEffect, useState } from "react";
+import { fetchOrderStatistics, type OrderStatistics } from "@/lib/api";
 import { formatCents } from "@/lib/format";
 
-const STATUS_ORDER: OrderStatus[] = [
-  "PENDING",
-  "PAID",
-  "SHIPPED",
-  "DELIVERED",
-  "CANCELLED",
-  "REFUNDED",
-  "RETURNED",
-];
+export function OrderStatisticsPanel({ onClose }: { onClose: () => void }) {
+  const [stats, setStats] = useState<OrderStatistics | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
-const REVENUE_STATUSES: OrderStatus[] = ["PAID", "SHIPPED", "DELIVERED"];
-
-export function OrderStatisticsPanel({ orders, onClose }: { orders: Order[]; onClose: () => void }) {
-  const totalOrders = orders.length;
-  const revenueOrders = orders.filter((o) => REVENUE_STATUSES.includes(o.status));
-  const totalRevenueCents = revenueOrders.reduce((sum, o) => sum + o.totalCents, 0);
-  const avgOrderValueCents = revenueOrders.length > 0 ? Math.round(totalRevenueCents / revenueOrders.length) : 0;
-  const newClientCount = orders.filter((o) => o.isNewClient).length;
-
-  const countsByStatus = STATUS_ORDER.map((status) => ({
-    status,
-    count: orders.filter((o) => o.status === status).length,
-  }));
+  useEffect(() => {
+    fetchOrderStatistics()
+      .then(setStats)
+      .catch((err) => setError(err instanceof Error ? err.message : "Failed to load statistics."));
+  }, []);
 
   return (
     <div className="fixed inset-0 z-50 flex justify-end bg-black/20" onClick={onClose}>
@@ -44,49 +31,55 @@ export function OrderStatisticsPanel({ orders, onClose }: { orders: Order[]; onC
           </button>
         </div>
 
-        <div className="space-y-6 px-6 py-6">
-          <div className="grid grid-cols-2 gap-4">
-            <div className="rounded-xl border border-ink-100 p-4">
-              <p className="text-xs uppercase tracking-wide text-ink-500">Total orders</p>
-              <p className="mt-1 text-2xl font-semibold text-ink-900">{totalOrders}</p>
+        {error ? (
+          <p className="px-6 py-8 text-sm text-brand-600">{error}</p>
+        ) : !stats ? (
+          <p className="px-6 py-8 text-sm text-ink-500">Loading...</p>
+        ) : (
+          <div className="space-y-6 px-6 py-6">
+            <div className="grid grid-cols-2 gap-4">
+              <div className="rounded-xl border border-ink-100 p-4">
+                <p className="text-xs uppercase tracking-wide text-ink-500">Total orders</p>
+                <p className="mt-1 text-2xl font-semibold text-ink-900">{stats.totalOrders}</p>
+              </div>
+              <div className="rounded-xl border border-ink-100 p-4">
+                <p className="text-xs uppercase tracking-wide text-ink-500">Revenue</p>
+                <p className="mt-1 text-2xl font-semibold text-ink-900">{formatCents(stats.totalRevenueCents)}</p>
+              </div>
+              <div className="rounded-xl border border-ink-100 p-4">
+                <p className="text-xs uppercase tracking-wide text-ink-500">Avg order value</p>
+                <p className="mt-1 text-2xl font-semibold text-ink-900">{formatCents(stats.avgOrderValueCents)}</p>
+              </div>
+              <div className="rounded-xl border border-ink-100 p-4">
+                <p className="text-xs uppercase tracking-wide text-ink-500">New clients</p>
+                <p className="mt-1 text-2xl font-semibold text-ink-900">{stats.newClientCount}</p>
+              </div>
             </div>
-            <div className="rounded-xl border border-ink-100 p-4">
-              <p className="text-xs uppercase tracking-wide text-ink-500">Revenue</p>
-              <p className="mt-1 text-2xl font-semibold text-ink-900">{formatCents(totalRevenueCents)}</p>
-            </div>
-            <div className="rounded-xl border border-ink-100 p-4">
-              <p className="text-xs uppercase tracking-wide text-ink-500">Avg order value</p>
-              <p className="mt-1 text-2xl font-semibold text-ink-900">{formatCents(avgOrderValueCents)}</p>
-            </div>
-            <div className="rounded-xl border border-ink-100 p-4">
-              <p className="text-xs uppercase tracking-wide text-ink-500">New clients</p>
-              <p className="mt-1 text-2xl font-semibold text-ink-900">{newClientCount}</p>
-            </div>
-          </div>
 
-          <div>
-            <p className="mb-3 text-sm font-medium text-ink-900">Orders by status</p>
-            <div className="space-y-2">
-              {countsByStatus.map(({ status, count }) => (
-                <div key={status} className="flex items-center gap-3">
-                  <span className="w-24 shrink-0 text-xs text-ink-500">{status}</span>
-                  <div className="h-2 flex-1 overflow-hidden rounded-full bg-gray-100">
-                    <div
-                      className="h-full rounded-full bg-brand-500"
-                      style={{ width: totalOrders > 0 ? `${(count / totalOrders) * 100}%` : "0%" }}
-                    />
+            <div>
+              <p className="mb-3 text-sm font-medium text-ink-900">Orders by status</p>
+              <div className="space-y-2">
+                {stats.countsByStatus.map(({ status, count }) => (
+                  <div key={status} className="flex items-center gap-3">
+                    <span className="w-24 shrink-0 text-xs text-ink-500">{status}</span>
+                    <div className="h-2 flex-1 overflow-hidden rounded-full bg-gray-100">
+                      <div
+                        className="h-full rounded-full bg-brand-500"
+                        style={{ width: stats.totalOrders > 0 ? `${(count / stats.totalOrders) * 100}%` : "0%" }}
+                      />
+                    </div>
+                    <span className="w-6 shrink-0 text-right text-xs font-medium text-ink-900">{count}</span>
                   </div>
-                  <span className="w-6 shrink-0 text-right text-xs font-medium text-ink-900">{count}</span>
-                </div>
-              ))}
+                ))}
+              </div>
             </div>
-          </div>
 
-          <p className="text-xs text-ink-500">
-            Revenue counts PAID, SHIPPED, and DELIVERED orders only — PENDING orders haven&apos;t been paid yet,
-            and CANCELLED/REFUNDED/RETURNED orders didn&apos;t result in kept revenue.
-          </p>
-        </div>
+            <p className="text-xs text-ink-500">
+              Revenue counts PAID, SHIPPED, and DELIVERED orders only — PENDING orders haven&apos;t been paid yet,
+              and CANCELLED/REFUNDED/RETURNED orders didn&apos;t result in kept revenue.
+            </p>
+          </div>
+        )}
       </div>
     </div>
   );

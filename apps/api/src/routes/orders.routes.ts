@@ -4,7 +4,14 @@ import { OrderStatus, PaymentMethod, AdminRole } from "@prisma/client";
 import { requireAuth, requireRole } from "../middleware/requireAuth";
 import { checkoutRateLimiter } from "../middleware/rateLimit";
 import { HttpError } from "../middleware/errorHandler";
-import { checkout, getOrderById, getOrdersForUser, listOrders, updateOrderStatus } from "../services/order.service";
+import {
+  checkout,
+  getOrderById,
+  getOrdersForUser,
+  getOrderStatistics,
+  listOrders,
+  updateOrderStatus,
+} from "../services/order.service";
 
 export const ordersRouter = Router();
 
@@ -54,10 +61,29 @@ ordersRouter.get("/me", async (req, res, next) => {
 // Everything below is backoffice-only.
 ordersRouter.use(requireAuth);
 
-ordersRouter.get("/", async (_req, res, next) => {
+const listQuerySchema = z.object({
+  search: z.string().optional(),
+  status: z.nativeEnum(OrderStatus).optional(),
+  dateFrom: z.string().optional(),
+  dateTo: z.string().optional(),
+  page: z.coerce.number().int().positive().optional(),
+});
+
+ordersRouter.get("/", async (req, res, next) => {
   try {
-    const orders = await listOrders();
-    res.json({ orders });
+    const filters = listQuerySchema.parse(req.query);
+    const result = await listOrders(filters);
+    res.json(result);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Registered before "/:id" so "statistics" never gets parsed as an order id.
+ordersRouter.get("/statistics", async (_req, res, next) => {
+  try {
+    const stats = await getOrderStatistics();
+    res.json(stats);
   } catch (err) {
     next(err);
   }

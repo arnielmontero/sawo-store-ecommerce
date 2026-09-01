@@ -3,11 +3,11 @@
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
-import { fetchOrder, updateOrderStatus, type OrderDetail, type OrderStatus } from "@/lib/api";
+import { fetchOrder, updateOrderStatus, refundPayment, type OrderDetail, type OrderStatus } from "@/lib/api";
 import { formatCents, formatPaymentMethod } from "@/lib/format";
 import { StatusBadge } from "@/components/StatusBadge";
 import { useAuth } from "@/lib/auth-context";
-import { NEXT_STATES, ACTION_LABELS } from "@/lib/orderStateMachine";
+import { NEXT_STATES, ACTION_LABELS, STATUS_HISTORY_LABELS } from "@/lib/orderStateMachine";
 
 export default function OrderDetailPage() {
   const params = useParams<{ id: string }>();
@@ -31,8 +31,18 @@ export default function OrderDetailPage() {
     setActionError(null);
     setUpdating(status);
     try {
-      const updated = await updateOrderStatus(Number(params.id), status);
-      setOrder(updated);
+      if (status === "REFUNDED") {
+        // Goes through the payments endpoint, which actually calls Stripe to
+        // move money back to the customer before flipping the order's
+        // status — the generic status PATCH only flips the status. Refetch
+        // for the full OrderDetail shape rather than trust the narrower
+        // Order shape refundPayment resolves to.
+        await refundPayment(Number(params.id));
+        load();
+      } else {
+        const updated = await updateOrderStatus(Number(params.id), status);
+        setOrder(updated);
+      }
     } catch (err) {
       setActionError(err instanceof Error ? err.message : "Failed to update order status.");
     } finally {
@@ -109,6 +119,41 @@ export default function OrderDetailPage() {
           <p className="mt-1 text-sm font-semibold text-ink-900">
             {new Date(order.createdAt).toLocaleDateString()}
           </p>
+        </div>
+      </div>
+
+      <div className="mt-6 rounded-xl border border-ink-100 bg-white">
+        <div className="border-b border-ink-100 px-5 py-4">
+          <p className="text-sm font-medium text-ink-900">Timeline</p>
+        </div>
+        <div className="px-5 py-5">
+          {order.statusHistory.length === 0 ? (
+            <p className="text-sm text-ink-500">No status history recorded.</p>
+          ) : (
+            <ol className="space-y-4">
+              {order.statusHistory.map((entry, i) => (
+                <li key={entry.id} className="flex gap-3">
+                  <div className="flex flex-col items-center">
+                    <span
+                      className={`h-2.5 w-2.5 shrink-0 rounded-full ${
+                        i === order.statusHistory.length - 1 ? "bg-brand-500" : "bg-ink-300"
+                      }`}
+                    />
+                    {i < order.statusHistory.length - 1 && <span className="mt-1 w-px flex-1 bg-ink-100" />}
+                  </div>
+                  <div className="pb-1">
+                    <p className="text-sm font-medium text-ink-900">{STATUS_HISTORY_LABELS[entry.status]}</p>
+                    <p className="text-xs text-ink-500">
+                      {new Date(entry.changedAt).toLocaleString(undefined, {
+                        dateStyle: "medium",
+                        timeStyle: "short",
+                      })}
+                    </p>
+                  </div>
+                </li>
+              ))}
+            </ol>
+          )}
         </div>
       </div>
 

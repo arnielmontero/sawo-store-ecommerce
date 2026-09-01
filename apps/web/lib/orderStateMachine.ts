@@ -22,3 +22,16 @@ export const ACTION_LABELS: Record<OrderStatus, string> = {
   REFUNDED: "Refund",
   RETURNED: "Mark Returned",
 };
+
+// Past-tense phrasing for a completed event in an order's timeline — distinct
+// from ACTION_LABELS, which is imperative button text ("Cancel Order") and
+// reads wrong as a history entry.
+export const STATUS_HISTORY_LABELS: Record<OrderStatus, string> = {
+  PENDING: "Order placed",
+  PAID: "Payment received",
+  SHIPPED: "Order shipped",
+  DELIVERED: "Order delivered",
+  CANCELLED: "Order cancelled",
+  REFUNDED: "Order refunded",
+  RETURNED: "Order returned",
+};

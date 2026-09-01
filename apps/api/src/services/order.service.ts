@@ -1,15 +1,93 @@
-import { OrderStatus, PaymentMethod } from "@prisma/client";
+import { OrderStatus, PaymentMethod, Prisma } from "@prisma/client";
 import { prisma } from "../lib/prisma";
 import { HttpError } from "../middleware/errorHandler";
 import { canTransition } from "../lib/orderStateMachine";
 import { priceCart, type CartLine } from "./pricing.service";
 import { reserveStock, releaseStock, commitReservedStock, restockCommittedStock } from "./inventory.service";
 
-export async function listOrders() {
-  return prisma.order.findMany({
-    include: { user: { select: { email: true } } },
-    orderBy: { createdAt: "desc" },
-  });
+const PAGE_SIZE = 20;
+
+export interface ListOrdersFilters {
+  search?: string;
+  status?: OrderStatus;
+  // Inclusive date range on createdAt — both ends optional so a caller can
+  // filter "from X" or "until Y" alone. Dates are passed as ISO strings from
+  // the query param and turned into Date here.
+  dateFrom?: string;
+  dateTo?: string;
+  page?: number;
+}
+
+export async function listOrders(filters: ListOrdersFilters = {}) {
+  const page = filters.page && filters.page > 0 ? filters.page : 1;
+
+  const where: Prisma.OrderWhereInput = {
+    ...(filters.status ? { status: filters.status } : {}),
+    ...(filters.search
+      ? {
+          OR: [
+            { reference: { contains: filters.search } },
+            { user: { email: { contains: filters.search } } },
+          ],
+        }
+      : {}),
+    ...(filters.dateFrom || filters.dateTo
+      ? {
+          createdAt: {
+            ...(filters.dateFrom ? { gte: new Date(filters.dateFrom) } : {}),
+            // dateTo is a calendar date from a date-picker (no time
+            // component) — push it to the end of that day so "to 2026-09-01"
+            // includes orders placed during that day, not only before midnight.
+            ...(filters.dateTo ? { lte: new Date(`${filters.dateTo}T23:59:59.999`) } : {}),
+          },
+        }
+      : {}),
+  };
+
+  const [orders, total] = await Promise.all([
+    prisma.order.findMany({
+      where,
+      include: { user: { select: { email: true } } },
+      orderBy: { createdAt: "desc" },
+      skip: (page - 1) * PAGE_SIZE,
+      take: PAGE_SIZE,
+    }),
+    prisma.order.count({ where }),
+  ]);
+
+  return {
+    orders,
+    pagination: { page, pageSize: PAGE_SIZE, total, totalPages: Math.ceil(total / PAGE_SIZE) },
+  };
+}
+
+const REVENUE_STATUSES: OrderStatus[] = [OrderStatus.PAID, OrderStatus.SHIPPED, OrderStatus.DELIVERED];
+
+// Powers the Order Statistics panel — computed over the FULL orders table,
+// not just whatever page the admin currently has open, since a stats panel
+// showing numbers that shift depending on pagination/filters would be
+// actively misleading rather than just incomplete.
+export async function getOrderStatistics() {
+  const [totalOrders, revenueAgg, newClientCount, statusGroups] = await Promise.all([
+    prisma.order.count(),
+    prisma.order.aggregate({
+      where: { status: { in: REVENUE_STATUSES } },
+      _sum: { totalCents: true },
+      _count: true,
+    }),
+    prisma.order.count({ where: { isNewClient: true } }),
+    prisma.order.groupBy({ by: ["status"], _count: true }),
+  ]);
+
+  const totalRevenueCents = revenueAgg._sum.totalCents ?? 0;
+  const avgOrderValueCents = revenueAgg._count > 0 ? Math.round(totalRevenueCents / revenueAgg._count) : 0;
+
+  const countsByStatus = Object.values(OrderStatus).map((status) => ({
+    status,
+    count: statusGroups.find((g) => g.status === status)?._count ?? 0,
+  }));
+
+  return { totalOrders, totalRevenueCents, avgOrderValueCents, newClientCount, countsByStatus };
 }
 
 export async function getOrdersForUser(userId: number) {
@@ -32,6 +110,7 @@ export async function getOrderById(id: number) {
           },
         },
       },
+      statusHistory: { orderBy: { changedAt: "asc" } },
     },
   });
 }
@@ -91,6 +170,7 @@ export async function checkout(input: CheckoutInput) {
           unitPriceCents: line.unitPriceCents,
         })),
       },
+      statusHistory: { create: { status: OrderStatus.PENDING } },
     },
     include: { items: true },
   });
@@ -130,6 +210,9 @@ export async function updateOrderStatus(orderId: number, nextStatus: OrderStatus
     }
   }
 
-  await prisma.order.update({ where: { id: orderId }, data: { status: nextStatus } });
+  await prisma.order.update({
+    where: { id: orderId },
+    data: { status: nextStatus, statusHistory: { create: { status: nextStatus } } },
+  });
   return getOrderById(orderId);
 }

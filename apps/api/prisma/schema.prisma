@@ -253,8 +253,24 @@ model Order {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  statusHistory OrderStatusHistory[]
+
   @@index([status])
   @@index([userId])
+}
+
+// One row per status transition — Order.updatedAt only ever reflects the
+// MOST RECENT change, so once an order has gone PENDING -> PAID -> SHIPPED,
+// there's no other way to answer "when was this paid?" once it's shipped.
+// This table is the real timeline shown on the order detail page.
+model OrderStatusHistory {
+  id        Int         @id @default(autoincrement())
+  order     Order       @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  orderId   Int
+  status    OrderStatus
+  changedAt DateTime    @default(now())
+
+  @@index([orderId])
 }
 
 model OrderItem {
