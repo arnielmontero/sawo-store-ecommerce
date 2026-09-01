@@ -634,6 +634,238 @@ async function seedPartialRefundExample(customers: { id: number }[], variantsByS
   });
 }
 
+// Two more hand-built orders so the newer admin features (Held Orders,
+// order notes, multi-refund audit trail) have more than a single example
+// each to show. Kept separate from seedPartialRefundExample for the same
+// reason that one is separate from the flat ORDERS table — richer shape
+// than OrderSeed carries.
+async function seedMoreOrderExamples(customers: { id: number }[], variantsBySku: Map<string, number>) {
+  const existing = await prisma.order.findFirst({ where: { reference: "SAW-BNCH-0030" } });
+  if (existing) return;
+
+  const priceBySku = new Map(
+    PRODUCTS.flatMap((product) => product.variants.map((v) => [v.sku, v.priceCents] as const))
+  );
+
+  // Order A: two sequential partial refunds on the same order — exercises
+  // the cumulative-restock tracking (RefundRecordItem summed across every
+  // prior RefundRecord) visibly in the UI, not just in code. Customer
+  // returned one backrest as the wrong length, then later decided to
+  // return one bench too, but kept the rest — order stays
+  // PARTIALLY_REFUNDED since the second bench and one backrest are kept.
+  {
+    const benchSku = "BNCH-ABACHI-6FT";
+    const backrestSku = "BCK-CEDAR-4FT";
+    const benchPriceCents = priceBySku.get(benchSku)!;
+    const backrestPriceCents = priceBySku.get(backrestSku)!;
+    const benchQuantity = 2;
+    const backrestQuantity = 2;
+    const subtotalCents = benchPriceCents * benchQuantity + backrestPriceCents * backrestQuantity;
+
+    const placedAt = new Date(Date.now() - 18 * 24 * 60 * 60 * 1000);
+    const paidAt = new Date(placedAt.getTime() + 15 * 60 * 1000);
+    const firstRefundAt = new Date(Date.now() - 11 * 24 * 60 * 60 * 1000);
+    const secondRefundAt = new Date(Date.now() - 4 * 24 * 60 * 60 * 1000);
+
+    const firstRefundCents = backrestPriceCents;
+    const secondRefundCents = benchPriceCents;
+
+    const order = await prisma.order.create({
+      data: {
+        reference: "SAW-BNCH-0030",
+        status: OrderStatus.PARTIALLY_REFUNDED,
+        paymentMethod: PaymentMethod.CARD,
+        isNewClient: false,
+        userId: customers[3].id,
+        subtotalCents,
+        totalCents: subtotalCents,
+        refundedCents: firstRefundCents + secondRefundCents,
+        stripePaymentIntentId: "pi_seed_014",
+        paymentAttemptCount: 1,
+        shippingAddress: ADDRESSES[2],
+        createdAt: placedAt,
+        items: {
+          create: [
+            { variantId: variantsBySku.get(benchSku)!, quantity: benchQuantity, unitPriceCents: benchPriceCents },
+            {
+              variantId: variantsBySku.get(backrestSku)!,
+              quantity: backrestQuantity,
+              unitPriceCents: backrestPriceCents,
+            },
+          ],
+        },
+        statusHistory: {
+          create: [
+            { status: OrderStatus.PENDING, changedAt: placedAt },
+            { status: OrderStatus.PAID, changedAt: paidAt },
+            { status: OrderStatus.PARTIALLY_REFUNDED, changedAt: firstRefundAt },
+            { status: OrderStatus.PARTIALLY_REFUNDED, changedAt: secondRefundAt },
+          ],
+        },
+        notes: {
+          create: [
+            {
+              body: "Customer ordered the 4ft backrest by mistake and wanted the 3ft — refunded and restocked one unit; they're keeping the second one as a spare.",
+              authorName: "Fulfillment Staff",
+              createdAt: firstRefundAt,
+            },
+            {
+              body: "Follow-up call: customer also returning one of the two Abachi benches, room ended up smaller than planned. Refunded and restocked one bench unit.",
+              authorName: "Admin",
+              createdAt: secondRefundAt,
+            },
+          ],
+        },
+      },
+      include: { items: true },
+    });
+
+    const benchItem = order.items.find((item) => item.variantId === variantsBySku.get(benchSku))!;
+    const backrestItem = order.items.find((item) => item.variantId === variantsBySku.get(backrestSku))!;
+
+    await prisma.refundRecord.create({
+      data: {
+        orderId: order.id,
+        amountCents: firstRefundCents,
+        stripeRefundId: "re_seed_002",
+        createdAt: firstRefundAt,
+        items: { create: { orderItemId: backrestItem.id, quantity: 1 } },
+      },
+    });
+    await prisma.refundRecord.create({
+      data: {
+        orderId: order.id,
+        amountCents: secondRefundCents,
+        stripeRefundId: "re_seed_003",
+        createdAt: secondRefundAt,
+        items: { create: { orderItemId: benchItem.id, quantity: 1 } },
+      },
+    });
+  }
+
+  // Order B: two partial refunds that add up to the FULL order total —
+  // exercises the path where refundOrder() computes newRefundedCents >=
+  // totalCents and lands the order on REFUNDED (not PARTIALLY_REFUNDED)
+  // even though it got there via the partial-refund flow. Customer
+  // returned a broken control panel, then decided against the whole order
+  // and returned the heater too.
+  {
+    const heaterSku = "HTR-INV-8KW";
+    const panelSku = "CTL-TOUCH-WHT";
+    const heaterPriceCents = priceBySku.get(heaterSku)!;
+    const panelPriceCents = priceBySku.get(panelSku)!;
+    const subtotalCents = heaterPriceCents + panelPriceCents;
+
+    const placedAt = new Date(Date.now() - 22 * 24 * 60 * 60 * 1000);
+    const paidAt = new Date(placedAt.getTime() + 10 * 60 * 1000);
+    const firstRefundAt = new Date(Date.now() - 16 * 24 * 60 * 60 * 1000);
+    const secondRefundAt = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000);
+
+    const order = await prisma.order.create({
+      data: {
+        reference: "SAW-HTR-0096",
+        status: OrderStatus.REFUNDED,
+        paymentMethod: PaymentMethod.CARD,
+        isNewClient: true,
+        userId: customers[6].id,
+        subtotalCents,
+        totalCents: subtotalCents,
+        refundedCents: subtotalCents,
+        stripePaymentIntentId: "pi_seed_015",
+        paymentAttemptCount: 1,
+        shippingAddress: ADDRESSES[4],
+        createdAt: placedAt,
+        items: {
+          create: [
+            { variantId: variantsBySku.get(heaterSku)!, quantity: 1, unitPriceCents: heaterPriceCents },
+            { variantId: variantsBySku.get(panelSku)!, quantity: 1, unitPriceCents: panelPriceCents },
+          ],
+        },
+        statusHistory: {
+          create: [
+            { status: OrderStatus.PENDING, changedAt: placedAt },
+            { status: OrderStatus.PAID, changedAt: paidAt },
+            { status: OrderStatus.PARTIALLY_REFUNDED, changedAt: firstRefundAt },
+            { status: OrderStatus.REFUNDED, changedAt: secondRefundAt },
+          ],
+        },
+        notes: {
+          create: [
+            {
+              body: "Control panel arrived with a cracked touchscreen — refunded and restocked for inspection/repair.",
+              authorName: "Fulfillment Staff",
+              createdAt: firstRefundAt,
+            },
+            {
+              body: "Customer decided to cancel the whole installation after the panel issue. Refunded the heater as well and restocked it; order fully resolved.",
+              authorName: "Admin",
+              createdAt: secondRefundAt,
+            },
+          ],
+        },
+      },
+      include: { items: true },
+    });
+
+    const heaterItem = order.items.find((item) => item.variantId === variantsBySku.get(heaterSku))!;
+    const panelItem = order.items.find((item) => item.variantId === variantsBySku.get(panelSku))!;
+
+    await prisma.refundRecord.create({
+      data: {
+        orderId: order.id,
+        amountCents: panelPriceCents,
+        stripeRefundId: "re_seed_004",
+        createdAt: firstRefundAt,
+        items: { create: { orderItemId: panelItem.id, quantity: 1 } },
+      },
+    });
+    await prisma.refundRecord.create({
+      data: {
+        orderId: order.id,
+        amountCents: heaterPriceCents,
+        stripeRefundId: "re_seed_005",
+        createdAt: secondRefundAt,
+        items: { create: { orderItemId: heaterItem.id, quantity: 1 } },
+      },
+    });
+  }
+}
+
+// Order notes on a couple of the plain flat-seeded orders (not just the
+// hand-built refund examples) so the Notes UI shows realistic non-refund
+// use too — shipping instructions, delivery follow-ups, etc.
+async function seedNotesOnExistingOrders() {
+  const shippedOrder = await prisma.order.findFirst({ where: { reference: "SAW-DOOR-0013" } });
+  if (shippedOrder) {
+    const already = await prisma.orderNote.findFirst({ where: { orderId: shippedOrder.id } });
+    if (!already) {
+      await prisma.orderNote.create({
+        data: {
+          orderId: shippedOrder.id,
+          body: "Customer requested delivery be left at the side entrance, not the front porch.",
+          authorName: "Fulfillment Staff",
+          createdAt: shippedOrder.createdAt,
+        },
+      });
+    }
+  }
+
+  const deliveredOrder = await prisma.order.findFirst({ where: { reference: "SAW-CTL-0019" } });
+  if (deliveredOrder) {
+    const already = await prisma.orderNote.findFirst({ where: { orderId: deliveredOrder.id } });
+    if (!already) {
+      await prisma.orderNote.create({
+        data: {
+          orderId: deliveredOrder.id,
+          body: "Confirmed delivery by phone with customer — installer scheduled separately, not part of this order.",
+          authorName: "Admin",
+          createdAt: deliveredOrder.createdAt,
+        },
+      });
+    }
+  }
+}
+
 async function seedSettings() {
   // Partial refunds default to off (see StoreSettings.allowPartialRefunds),
   // but the seed data now includes a real partially-refunded order — turn
@@ -654,13 +886,16 @@ async function main() {
   const variantsBySku = await seedCatalog();
   await seedOrders(customers, variantsBySku);
   await seedPartialRefundExample(customers, variantsBySku);
+  await seedMoreOrderExamples(customers, variantsBySku);
+  await seedNotesOnExistingOrders();
 
   const productCount = PRODUCTS.length;
   const variantCount = PRODUCTS.reduce((sum, p) => sum + p.variants.length, 0);
   console.log(
     `Seeded admin user (admin / admin123), staff user (staff / staff123), ${customers.length} customers, ` +
-      `${CATEGORIES.length} categories, ${productCount} products (${variantCount} variants), ${ORDERS.length + 1} orders ` +
-      `(including one partially-refunded example), and enabled partial refunds in store settings.`
+      `${CATEGORIES.length} categories, ${productCount} products (${variantCount} variants), ${ORDERS.length + 3} orders ` +
+      `(including 3 refund examples — one held with a single partial refund, one held with two sequential partial ` +
+      `refunds, and one fully resolved via two partial refunds), 4 order notes, and enabled partial refunds in store settings.`
   );
 }
 
