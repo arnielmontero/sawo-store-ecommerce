@@ -699,3 +699,89 @@ export async function resetSeedData(): Promise<{ message: string }> {
     body: JSON.stringify({ confirm: "RESET" }),
   });
 }
+
+// ── Inventory ──────────────────────────────────────────────────────────
+
+export interface InventoryRow {
+  variantId: number;
+  sku: string;
+  productId: number;
+  productTitle: string;
+  categoryName: string | null;
+  attributes: Record<string, string> | null;
+  stockQuantity: number;
+  reservedQuantity: number;
+  availableQuantity: number;
+  isLowStock: boolean;
+  isOutOfStock: boolean;
+}
+
+export interface InventoryPage {
+  variants: InventoryRow[];
+  pagination: { page: number; pageSize: number; total: number; totalPages: number };
+}
+
+export async function fetchInventory(params: {
+  search?: string;
+  stockFilter?: "low" | "out";
+  page?: number;
+  sortDir?: "asc" | "desc";
+}): Promise<InventoryPage> {
+  const query = new URLSearchParams();
+  if (params.search) query.set("search", params.search);
+  if (params.stockFilter) query.set("stockFilter", params.stockFilter);
+  if (params.page) query.set("page", String(params.page));
+  if (params.sortDir) query.set("sortDir", params.sortDir);
+  const qs = query.toString();
+  return apiFetch(`/api/v1/inventory/admin${qs ? `?${qs}` : ""}`);
+}
+
+export interface InventorySummary {
+  totalVariants: number;
+  outOfStock: number;
+  lowStock: number;
+}
+
+export async function fetchInventorySummary(): Promise<InventorySummary> {
+  return apiFetch("/api/v1/inventory/admin/summary");
+}
+
+export type StockAdjustmentReason = "MANUAL" | "ORDER_SALE" | "ORDER_RETURN" | "REFUND_RESTOCK";
+
+export interface StockAdjustment {
+  id: number;
+  variantId: number;
+  reason: StockAdjustmentReason;
+  deltaQuantity: number;
+  resultingQuantity: number;
+  note: string | null;
+  adminName: string | null;
+  orderId: number | null;
+  orderReference: string | null;
+  createdAt: string;
+}
+
+export interface StockAdjustmentPage {
+  adjustments: StockAdjustment[];
+  pagination: { page: number; pageSize: number; total: number; totalPages: number };
+}
+
+export async function fetchStockAdjustmentHistory(
+  variantId: number,
+  page?: number
+): Promise<StockAdjustmentPage> {
+  const qs = page ? `?page=${page}` : "";
+  return apiFetch(`/api/v1/inventory/admin/${variantId}/history${qs}`);
+}
+
+export async function adjustStock(
+  variantId: number,
+  stockQuantity: number,
+  note: string
+): Promise<{ variantId: number; stockQuantity: number; reservedQuantity: number }> {
+  const data = await apiFetch(`/api/v1/inventory/admin/${variantId}/adjust`, {
+    method: "PATCH",
+    body: JSON.stringify({ stockQuantity, note }),
+  });
+  return data.inventory;
+}

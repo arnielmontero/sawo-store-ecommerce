@@ -1,5 +1,5 @@
 import Stripe from "stripe";
-import { OrderStatus } from "@prisma/client";
+import { OrderStatus, StockAdjustmentReason } from "@prisma/client";
 import { prisma } from "../lib/prisma";
 import { stripe } from "../lib/stripe";
 import { HttpError } from "../middleware/errorHandler";
@@ -197,7 +197,12 @@ export async function refundOrder(orderId: number, input: RefundInput = {}) {
     input.items ?? (order.refunds.length === 0 ? order.items.map((item) => ({ orderItemId: item.id, quantity: item.quantity })) : []);
   for (const line of restockLines) {
     const item = itemsById.get(line.orderItemId)!;
-    await restockCommittedStock(item.variantId, line.quantity);
+    await restockCommittedStock(
+      item.variantId,
+      line.quantity,
+      { orderId: order.id, orderReference: order.reference },
+      StockAdjustmentReason.REFUND_RESTOCK
+    );
   }
 
   const newRefundedCents = order.refundedCents + amountCents;

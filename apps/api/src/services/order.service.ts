@@ -1,4 +1,4 @@
-import { OrderStatus, PaymentMethod, Prisma } from "@prisma/client";
+import { OrderStatus, PaymentMethod, Prisma, StockAdjustmentReason } from "@prisma/client";
 import { prisma } from "../lib/prisma";
 import { HttpError } from "../middleware/errorHandler";
 import { canTransition } from "../lib/orderStateMachine";
@@ -299,10 +299,12 @@ export async function updateOrderStatus(orderId: number, nextStatus: OrderStatus
     throw new HttpError(409, `Cannot transition order from ${order.status} to ${nextStatus}`);
   }
 
+  const orderContext = { orderId: order.id, orderReference: order.reference };
+
   if (nextStatus === OrderStatus.PAID) {
     // Converts the checkout-time reservation into a real deduction.
     for (const item of order.items) {
-      await commitReservedStock(item.variantId, item.quantity);
+      await commitReservedStock(item.variantId, item.quantity, orderContext);
     }
   } else if (nextStatus === OrderStatus.CANCELLED) {
     // CANCELLED is only reachable from PENDING (see orderStateMachine.ts),
@@ -320,8 +322,12 @@ export async function updateOrderStatus(orderId: number, nextStatus: OrderStatus
     // PARTIALLY_REFUNDED: that path already did its own targeted restock in
     // payment.service.ts's refundOrder for each partial refund along the
     // way, so blanket-restocking here again would double-count those units.
+    const reason =
+      nextStatus === OrderStatus.RETURNED
+        ? StockAdjustmentReason.ORDER_RETURN
+        : StockAdjustmentReason.REFUND_RESTOCK;
     for (const item of order.items) {
-      await restockCommittedStock(item.variantId, item.quantity);
+      await restockCommittedStock(item.variantId, item.quantity, orderContext, reason);
     }
   }
 

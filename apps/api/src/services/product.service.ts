@@ -492,18 +492,6 @@ export async function setVariantActive(variantId: number, isActive: boolean) {
   return prisma.productVariant.update({ where: { id: variantId }, data: { isActive } });
 }
 
-// Directly sets a variant's on-hand stock (e.g. after a restock delivery or
-// a physical count correction) — distinct from reserveStock/commitReservedStock
-// in inventory.service.ts, which only ever move stock as a side effect of
-// the order lifecycle. This never touches reservedQuantity, so an admin
-// correcting stock can't accidentally erase an in-flight reservation.
-export async function setVariantStock(variantId: number, stockQuantity: number) {
-  const inventory = await prisma.inventory.findUnique({ where: { variantId } });
-  if (!inventory) throw new HttpError(404, "Variant not found");
-
-  return prisma.inventory.update({ where: { variantId }, data: { stockQuantity } });
-}
-
 // ── Product images ────────────────────────────────────────────────────
 
 export async function addProductImage(productId: number, url: string) {

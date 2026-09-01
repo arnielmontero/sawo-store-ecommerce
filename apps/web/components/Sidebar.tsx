@@ -9,6 +9,7 @@ const NAV_ITEMS = [
   { href: "/dashboard", label: "Dashboard", icon: DashboardIcon },
   { href: "/orders", label: "Orders", icon: OrdersIcon },
   { href: "/catalog", label: "Catalog", icon: CatalogIcon },
+  { href: "/inventory", label: "Inventory", icon: InventoryIcon },
   { href: "/customers", label: "Customers", icon: CustomersIcon },
   { href: "/deliveries", label: "Deliveries", icon: ShippingIcon },
   { href: "/payments", label: "Payments", icon: PaymentsIcon },
@@ -101,6 +102,16 @@ function CatalogIcon(props: React.SVGProps<SVGSVGElement>) {
     <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.6" {...props}>
       <rect x="3" y="4" width="14" height="12" rx="1.5" />
       <path d="M3 8h14" />
+    </svg>
+  );
+}
+
+function InventoryIcon(props: React.SVGProps<SVGSVGElement>) {
+  return (
+    <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.6" {...props}>
+      <path d="M4 6l6-3 6 3-6 3-6-3z" />
+      <path d="M4 6v8l6 3 6-3V6" />
+      <path d="M10 9v8" />
     </svg>
   );
 }

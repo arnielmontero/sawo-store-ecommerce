@@ -24,12 +24,13 @@ import {
   listTags,
   reorderProductImages,
   setFeaturedImage,
-  setVariantStock,
   setVariantActive,
   updateCategory,
   updateProduct,
 } from "../services/product.service";
 import { exportProductsCsv, importProductsCsv } from "../services/productCsv.service";
+import { adjustStockManually } from "../services/inventory.service";
+import { prisma } from "../lib/prisma";
 
 export const productsRouter = Router();
 
@@ -327,7 +328,11 @@ adminRouter.patch(
     try {
       const variantId = Number(req.params.variantId);
       const { stockQuantity } = stockSchema.parse(req.body);
-      const inventory = await setVariantStock(variantId, stockQuantity);
+      const admin = await prisma.adminUser.findUnique({ where: { id: req.adminAuth!.userId } });
+      if (!admin) throw new HttpError(401, "Unauthorized");
+      await adjustStockManually(variantId, stockQuantity, admin.name);
+      const inventory = await prisma.inventory.findUnique({ where: { variantId } });
+      if (!inventory) throw new HttpError(404, "Variant not found");
       res.json({ inventory });
     } catch (err) {
       next(err);

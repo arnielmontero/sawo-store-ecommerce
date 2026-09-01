@@ -89,11 +89,11 @@ model ProductTag {
 }
 
 model Product {
-  id             Int      @id @default(autoincrement())
-  title          String
-  slug           String   @unique
-  description    String?  @db.Text
-  basePriceCents Int
+  id                  Int       @id @default(autoincrement())
+  title               String
+  slug                String    @unique
+  description         String?   @db.Text
+  basePriceCents      Int
   // Optional "was" price shown struck through next to basePriceCents to
   // present a sale (e.g. compareAtPriceCents: 5000, basePriceCents: 3500 ->
   // "$50 $35"). Null means the product isn't on sale.
@@ -103,22 +103,22 @@ model Product {
   // instants; both null means the sale runs indefinitely as long as
   // compareAtPriceCents is set. Lets an admin schedule a deal in advance and
   // have it expire on its own without a cron job (checked at read time).
-  saleStartsAt DateTime?
-  saleEndsAt   DateTime?
-  currency       String   @default("usd")
+  saleStartsAt        DateTime?
+  saleEndsAt          DateTime?
+  currency            String    @default("usd")
   // Deprecated in favor of ProductImage (a product can have a gallery now),
   // kept only so existing rows/callers that set a single imageUrl still
   // resolve to something — new code should read images[] instead.
-  imageUrl       String?
-  metaTitle       String?
-  metaDescription String? @db.Text
+  imageUrl            String?
+  metaTitle           String?
+  metaDescription     String?   @db.Text
   // Manual admin ordering for the catalog list (drag-to-reorder) — lower
   // sorts first. Defaults to 0 so existing products don't need a backfill
   // to keep their relative order stable (falls back to createdAt).
-  sortOrder Int @default(0)
-  isActive  Boolean  @default(true)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  sortOrder           Int       @default(0)
+  isActive            Boolean   @default(true)
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
 
   categoryId Int?
   category   Category? @relation(fields: [categoryId], references: [id])
@@ -148,15 +148,15 @@ model ProductImage {
 }
 
 model ProductVariant {
-  id         Int    @id @default(autoincrement())
-  sku        String @unique
-  priceCents Int
+  id                  Int       @id @default(autoincrement())
+  sku                 String    @unique
+  priceCents          Int
   // Flexible per-variant traits (size, color, etc.) that vary by product
   // type — a JSON column avoids a rigid schema for every possible attribute.
-  attributes Json?
+  attributes          Json?
   // Optional per-variant override image (e.g. the red variant shows a red
   // photo) — falls back to the product's featured image when null.
-  imageUrl String?
+  imageUrl            String?
   // Per-variant sale — same shape/semantics as Product.compareAtPriceCents
   // and its date window, but scoped to just this variant so a promo can
   // target e.g. only the Bronze tint instead of every variant under the
@@ -172,13 +172,14 @@ model ProductVariant {
   // this row. A variant hidden here disappears from storefront reads even
   // when the parent product is active; the admin still sees it (greyed out)
   // so it can be reactivated or its stock reviewed.
-  isActive Boolean @default(true)
+  isActive            Boolean   @default(true)
 
   productId Int
   product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)
 
-  inventory  Inventory?
-  orderItems OrderItem[]
+  inventory        Inventory?
+  orderItems       OrderItem[]
+  stockAdjustments StockAdjustment[]
 
   @@index([productId])
 }
@@ -191,6 +192,46 @@ model Inventory {
   variant          ProductVariant @relation(fields: [variantId], references: [id], onDelete: Cascade)
   stockQuantity    Int            @default(0)
   reservedQuantity Int            @default(0)
+}
+
+// Every reason stockQuantity can change — mirrors the code paths that
+// actually mutate it in inventory.service.ts, so this table is a complete
+// "why is this at N now" history, not just a log of manual edits.
+enum StockAdjustmentReason {
+  MANUAL // An admin typed a new quantity into the Inventory page.
+  ORDER_SALE // commitReservedStock — an order was marked PAID.
+  ORDER_RETURN // restockCommittedStock — an order reached RETURNED/REFUNDED.
+  REFUND_RESTOCK // restockCommittedStock via a partial refund's specific item list.
+}
+
+// One row per stockQuantity change. deltaQuantity is signed (positive =
+// stock added, negative = stock removed) so the whole history can be summed
+// to reconstruct stock at any point in time; resultingQuantity is stored
+// too so a single row is readable on its own without replaying the sum.
+model StockAdjustment {
+  id                Int                   @id @default(autoincrement())
+  variant           ProductVariant        @relation(fields: [variantId], references: [id], onDelete: Cascade)
+  variantId         Int
+  reason            StockAdjustmentReason
+  deltaQuantity     Int
+  resultingQuantity Int
+  note              String?
+  // Set only for MANUAL adjustments — who typed the new number in. Kept as
+  // a plain string snapshot (like OrderNote.authorName) rather than a hard
+  // FK, so a past adjustment stays legible even if that admin account is
+  // later removed.
+  adminName         String?
+  // Set only for the order-driven reasons (ORDER_SALE/ORDER_RETURN/
+  // REFUND_RESTOCK) — lets the history link back to the order that caused
+  // it. Not a hard FK: an order can be hard-deleted (see
+  // dataReset.service.ts's "Clear all data") without needing to cascade
+  // through every stock adjustment it ever caused.
+  orderId           Int?
+  orderReference    String?
+  createdAt         DateTime              @default(now())
+
+  @@index([variantId])
+  @@index([orderId])
 }
 
 // ── Orders ─────────────────────────────────────────────────────────────
@@ -222,9 +263,9 @@ enum PaymentMethod {
 }
 
 model Order {
-  id        Int         @id @default(autoincrement())
-  reference String
-  status    OrderStatus @default(PENDING)
+  id            Int            @id @default(autoincrement())
+  reference     String
+  status        OrderStatus    @default(PENDING)
   // Null until checkout completes with a chosen payment method — an order
   // exists in PENDING before payment happens (see diagram: checkout locks
   // prices/stock and creates a PENDING order; a webhook later confirms
@@ -247,7 +288,7 @@ model Order {
   // half of the idempotency key (orderId-attemptCount) passed to Stripe, so
   // a network retry of the same attempt reuses the same PaymentIntent
   // instead of creating a duplicate charge.
-  paymentAttemptCount  Int     @default(0)
+  paymentAttemptCount   Int     @default(0)
   stripePaymentIntentId String? @unique
 
   // Running total refunded so far across every RefundRecord for this order —
@@ -312,12 +353,12 @@ model RefundRecordItem {
 // than a hard FK, so a note stays legible even if that admin account is
 // later removed.
 model OrderNote {
-  id        Int      @id @default(autoincrement())
-  order     Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  orderId   Int
-  body      String   @db.Text
+  id         Int      @id @default(autoincrement())
+  order      Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  orderId    Int
+  body       String   @db.Text
   authorName String
-  createdAt DateTime @default(now())
+  createdAt  DateTime @default(now())
 
   @@index([orderId])
 }
@@ -371,15 +412,15 @@ model ProcessedWebhookEvent {
 // columns here as Configuration grows rather than one-off hardcoded values
 // elsewhere in the UI.
 model StoreSettings {
-  id        Int      @id @default(1)
-  storeName String   @default("Sawo Shop")
+  id                  Int      @id @default(1)
+  storeName           String   @default("Sawo Shop")
   // Null means "no logo uploaded" — the Sidebar falls back to a plain
   // initial-letter box in that case rather than a broken image.
-  logoUrl   String?
+  logoUrl             String?
   // Off by default — partial refunds leave an order in an in-between
   // PARTIALLY_REFUNDED state with specific items/quantities held out of
   // inventory, which is a real operational mode staff need to opt into
   // rather than have silently available. See payment.service.ts refundOrder.
-  allowPartialRefunds Boolean @default(false)
-  updatedAt DateTime @updatedAt
+  allowPartialRefunds Boolean  @default(false)
+  updatedAt           DateTime @updatedAt
 }

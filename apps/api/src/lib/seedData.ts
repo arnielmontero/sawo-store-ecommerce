@@ -1,4 +1,4 @@
-import { OrderStatus, PaymentMethod, AdminRole } from "@prisma/client";
+import { OrderStatus, PaymentMethod, AdminRole, StockAdjustmentReason } from "@prisma/client";
 import { prisma } from "./prisma";
 import { hashPassword } from "./password";
 
@@ -1137,6 +1137,131 @@ async function seedSettings() {
   });
 }
 
+// Reconstructs StockAdjustment rows for every order created before the
+// Inventory module existed — without this, every variant's stock history
+// panel would show "No stock changes recorded" despite 800+ orders having
+// actually moved stock. Walks each order's real statusHistory/refunds
+// (already seeded) to know WHEN each change happened and by how much, then
+// works backwards from each variant's CURRENT stock to infer a consistent
+// resultingQuantity at every step — the only way to reconstruct a real
+// running total after the fact, since the adjustments themselves were never
+// recorded when they happened.
+async function backfillStockAdjustmentHistory() {
+  const already = await prisma.stockAdjustment.findFirst({ where: { note: "Backfilled from order history" } });
+  if (already) return;
+
+  const orders = await prisma.order.findMany({
+    include: { items: true, statusHistory: true, refunds: { include: { items: true } } },
+  });
+
+  // One chronological list of (variantId, delta, timestamp, reason, order)
+  // events across every order, in the exact order inventory.service.ts's
+  // real functions would have created them.
+  interface Event {
+    variantId: number;
+    delta: number;
+    at: Date;
+    reason: StockAdjustmentReason;
+    orderId: number;
+    orderReference: string;
+  }
+  const events: Event[] = [];
+
+  for (const order of orders) {
+    const paidAt = order.statusHistory.find((h) => h.status === OrderStatus.PAID)?.changedAt;
+    const returnedAt = order.statusHistory.find((h) => h.status === OrderStatus.RETURNED)?.changedAt;
+    // A plain full refund (never partial) restocks everything at the moment
+    // it reached REFUNDED — matches updateOrderStatus's blanket-restock
+    // branch. Orders that went through PARTIALLY_REFUNDED already have
+    // their restocks captured via order.refunds below instead.
+    const refundedAt =
+      order.status === OrderStatus.REFUNDED && order.refunds.length === 0
+        ? order.statusHistory.find((h) => h.status === OrderStatus.REFUNDED)?.changedAt
+        : undefined;
+
+    if (paidAt) {
+      for (const item of order.items) {
+        events.push({
+          variantId: item.variantId,
+          delta: -item.quantity,
+          at: paidAt,
+          reason: StockAdjustmentReason.ORDER_SALE,
+          orderId: order.id,
+          orderReference: order.reference,
+        });
+      }
+    }
+    if (returnedAt || refundedAt) {
+      for (const item of order.items) {
+        events.push({
+          variantId: item.variantId,
+          delta: item.quantity,
+          at: (returnedAt ?? refundedAt)!,
+          reason: returnedAt ? StockAdjustmentReason.ORDER_RETURN : StockAdjustmentReason.REFUND_RESTOCK,
+          orderId: order.id,
+          orderReference: order.reference,
+        });
+      }
+    }
+    // Partial (or partial-then-completing) refunds already recorded exactly
+    // which item/quantity was restocked and when via RefundRecord — reuse
+    // that instead of re-deriving it.
+    for (const refund of order.refunds) {
+      for (const line of refund.items) {
+        const item = order.items.find((i) => i.id === line.orderItemId);
+        if (!item) continue;
+        events.push({
+          variantId: item.variantId,
+          delta: line.quantity,
+          at: refund.createdAt,
+          reason: StockAdjustmentReason.REFUND_RESTOCK,
+          orderId: order.id,
+          orderReference: order.reference,
+        });
+      }
+    }
+  }
+
+  events.sort((a, b) => a.at.getTime() - b.at.getTime());
+
+  // Work out where each variant's running total STARTS: current stock minus
+  // the sum of every delta about to be replayed. Then replay forward,
+  // writing a resultingQuantity at each step that is internally consistent
+  // and lands exactly on today's real stock number at the end.
+  const currentStock = new Map<number, number>();
+  for (const inventory of await prisma.inventory.findMany()) {
+    currentStock.set(inventory.variantId, inventory.stockQuantity);
+  }
+  const netDeltaByVariant = new Map<number, number>();
+  for (const event of events) {
+    netDeltaByVariant.set(event.variantId, (netDeltaByVariant.get(event.variantId) ?? 0) + event.delta);
+  }
+  const runningTotal = new Map<number, number>();
+  for (const [variantId, current] of currentStock) {
+    runningTotal.set(variantId, current - (netDeltaByVariant.get(variantId) ?? 0));
+  }
+
+  const rows = events.map((event) => {
+    const before = runningTotal.get(event.variantId) ?? 0;
+    const after = before + event.delta;
+    runningTotal.set(event.variantId, after);
+    return {
+      variantId: event.variantId,
+      reason: event.reason,
+      deltaQuantity: event.delta,
+      resultingQuantity: after,
+      note: "Backfilled from order history",
+      orderId: event.orderId,
+      orderReference: event.orderReference,
+      createdAt: event.at,
+    };
+  });
+
+  if (rows.length > 0) {
+    await prisma.stockAdjustment.createMany({ data: rows });
+  }
+}
+
 // The actual seeding work, callable both from the CLI entry point
 // (prisma/seed.ts, run via npm run db:seed) and in-process from the API
 // server (Configuration -> "Reset seed data"). Returns a human-readable
@@ -1154,6 +1279,7 @@ export async function runSeed(): Promise<string> {
   await seedMoreOrderExamples(customers, variantsBySku);
   await seedNotesOnExistingOrders();
   await seedBulkOrders([...customers, ...bulkCustomers], variantsBySku);
+  await backfillStockAdjustmentHistory();
 
   const productCount = PRODUCTS.length;
   const variantCount = PRODUCTS.reduce((sum, p) => sum + p.variants.length, 0);
