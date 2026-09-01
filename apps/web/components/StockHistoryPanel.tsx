@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { fetchStockAdjustmentHistory, type InventoryRow, type StockAdjustment } from "@/lib/api";
 
 const REASON_LABELS: Record<StockAdjustment["reason"], string> = {
@@ -80,7 +81,17 @@ export function StockHistoryPanel({ variant, onClose }: { variant: InventoryRow;
                   </p>
                   {adj.orderReference && (
                     <p className="mt-1 text-xs text-ink-500">
-                      Order <span className="font-mono">{adj.orderReference}</span>
+                      Order{" "}
+                      {adj.orderId ? (
+                        <Link
+                          href={`/orders/${adj.orderId}`}
+                          className="font-mono text-brand-600 hover:underline"
+                        >
+                          {adj.orderReference}
+                        </Link>
+                      ) : (
+                        <span className="font-mono">{adj.orderReference}</span>
+                      )}
                     </p>
                   )}
                   {adj.adminName && <p className="mt-1 text-xs text-ink-500">By {adj.adminName}</p>}
