@@ -129,6 +129,16 @@ export function ReviewsAndQnaPanel({ productId, canModerate }: { productId: numb
 
   const unansweredCount = questions?.filter((q) => !q.answeredAt).length ?? 0;
 
+  // Which customers show up on BOTH lists for this product — surfaced as a
+  // small badge on each matching entry so staff can see "this is the same
+  // person" without cross-checking tabs manually. Only meaningful for
+  // reviews (always has a real userId — Verified Purchase) matched against
+  // questions that also have one; a question asked with just a free-typed
+  // name (no account) never matches, same as it never appears in the
+  // "Log review" customer picker.
+  const reviewerUserIds = new Set((reviews ?? []).map((r) => r.userId).filter((id): id is number => id !== null));
+  const askerUserIds = new Set((questions ?? []).map((q) => q.userId).filter((id): id is number => id !== null));
+
   return (
     <div className="mt-6 rounded-xl border border-ink-100 bg-white">
       <div className="flex items-center justify-between border-b border-ink-100 px-5 py-4">
@@ -247,7 +257,17 @@ export function ReviewsAndQnaPanel({ productId, canModerate }: { productId: numb
                 {reviews.map((review) => (
                   <li key={review.id} className="rounded-lg border border-ink-100 p-4">
                     <div className="flex items-center justify-between gap-2">
-                      <Stars rating={review.rating} />
+                      <div className="flex items-center gap-2">
+                        <Stars rating={review.rating} />
+                        {review.userId !== null && askerUserIds.has(review.userId) && (
+                          <span
+                            className="rounded-full bg-brand-50 px-2 py-0.5 text-xs font-medium text-brand-600"
+                            title="This customer also asked a question about this product"
+                          >
+                            Also asked a question
+                          </span>
+                        )}
+                      </div>
                       <span className="text-xs text-ink-500">
                         {review.authorName} · {formatDateTime(review.createdAt)}
                       </span>
@@ -343,13 +363,23 @@ export function ReviewsAndQnaPanel({ productId, canModerate }: { productId: numb
                 {questions.map((q) => (
                   <li key={q.id} className="rounded-lg border border-ink-100 p-4">
                     <div className="flex items-center justify-between gap-2">
-                      <span
-                        className={`rounded-full px-2 py-0.5 text-xs font-medium ${
-                          q.answeredAt ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700"
-                        }`}
-                      >
-                        {q.answeredAt ? "Answered" : "Unanswered"}
-                      </span>
+                      <div className="flex items-center gap-2">
+                        <span
+                          className={`rounded-full px-2 py-0.5 text-xs font-medium ${
+                            q.answeredAt ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700"
+                          }`}
+                        >
+                          {q.answeredAt ? "Answered" : "Unanswered"}
+                        </span>
+                        {q.userId !== null && reviewerUserIds.has(q.userId) && (
+                          <span
+                            className="rounded-full bg-brand-50 px-2 py-0.5 text-xs font-medium text-brand-600"
+                            title="This customer also left a review for this product"
+                          >
+                            Also left a review
+                          </span>
+                        )}
+                      </div>
                       <span className="text-xs text-ink-500">
                         {q.authorName} · {formatDateTime(q.createdAt)}
                       </span>

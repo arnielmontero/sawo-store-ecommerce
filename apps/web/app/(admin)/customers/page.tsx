@@ -78,6 +78,7 @@ export default function CustomersPage() {
                   <th className="px-3 py-3 font-medium">Orders</th>
                   <th className="px-3 py-3 font-medium">Total spent</th>
                   <th className="px-3 py-3 font-medium">In cart</th>
+                  <th className="px-3 py-3 font-medium">Feedback</th>
                 </tr>
               </thead>
               <tbody>
@@ -102,6 +103,19 @@ export default function CustomersPage() {
                           title="Items logged as cart interest, not yet checked out"
                         >
                           {customer.cartItemCount} item{customer.cartItemCount === 1 ? "" : "s"}
+                        </Link>
+                      ) : (
+                        <span className="text-ink-300">—</span>
+                      )}
+                    </td>
+                    <td className="px-3 py-3">
+                      {customer.feedbackCount > 0 ? (
+                        <Link
+                          href={`/customers/${customer.id}`}
+                          className="rounded-full bg-brand-50 px-2 py-0.5 text-xs font-medium text-brand-600 hover:bg-brand-100"
+                          title="Reviews and questions this customer has left, across all products"
+                        >
+                          {customer.feedbackCount}
                         </Link>
                       ) : (
                         <span className="text-ink-300">—</span>

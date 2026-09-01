@@ -1611,12 +1611,19 @@ async function seedReviewAndQuestionExamples() {
     answeredByName?: string;
     days: number;
     answeredDays?: number;
+    // When true, links this question to the same customer who reviewed
+    // this product (found via findPurchaser above) instead of a made-up
+    // name — demonstrates the "also left a review" / "also asked a
+    // question" cross-reference on the Catalog page's Reviews & Q&A panel
+    // with a real, matching customer rather than two disconnected people.
+    linkToReviewer?: boolean;
   }[] = [
     {
       slug: "nordic-electric-sauna-heater",
       authorName: "Priya K.",
       question: "Can this run on a 220V single-phase supply, or does it need three-phase?",
       days: 1,
+      linkToReviewer: true,
     },
     {
       slug: "finnish-peridotite-sauna-stones",
@@ -1659,10 +1666,12 @@ async function seedReviewAndQuestionExamples() {
     },
   ];
   for (const q of questions) {
+    const reviewer = q.linkToReviewer ? await findPurchaser(p[q.slug].id) : null;
     const created = await prisma.productQuestion.create({
       data: {
         productId: p[q.slug].id,
-        authorName: q.authorName,
+        userId: reviewer?.id,
+        authorName: reviewer?.email ?? q.authorName,
         question: q.question,
         answer: q.answer,
         answeredByName: q.answeredByName,

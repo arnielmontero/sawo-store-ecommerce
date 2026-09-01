@@ -181,6 +181,9 @@ export interface Customer {
   // — not a real live cart (see CartLead in schema.prisma), just "how many
   // units are currently on hold, not yet checked out."
   cartItemCount: number;
+  // Combined reviews + questions this customer has left, across every
+  // product — the detail page breaks these out individually.
+  feedbackCount: number;
 }
 
 export interface CustomersPage {

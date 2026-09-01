@@ -42,6 +42,12 @@ export async function listCustomers(filters: ListCustomersFilters = {}) {
         // "how many units are sitting on hold" without a separate request
         // per row.
         cartLeads: { select: { items: { select: { quantity: true } } } },
+        // Same idea as cartLeads above — just the counts, so the list can
+        // show "this customer left feedback" without a separate request
+        // per row. Reviews and questions are combined into one figure on
+        // the list (see the "Feedback" column); the detail page breaks
+        // them out individually.
+        _count: { select: { reviews: true, questions: true } },
       },
     }),
     prisma.user.count({ where }),
@@ -61,6 +67,7 @@ export async function listCustomers(filters: ListCustomersFilters = {}) {
       orderCount: user.orders.length,
       totalSpentCents: completedOrders.reduce((sum, o) => sum + o.totalCents, 0),
       cartItemCount,
+      feedbackCount: user._count.reviews + user._count.questions,
     };
   });
 
