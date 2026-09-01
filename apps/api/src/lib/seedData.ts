@@ -1314,12 +1314,17 @@ async function seedBulkCustomerProfiles(bulkCustomers: { id: number }[]) {
 
 // A spread of "still deciding, hasn't purchased yet" leads across several
 // customers and products — demonstrates the Customer page's "Cart
-// interest" section with real variety, not just one lonely example (see
-// cartLead.service.ts — there's no real add-to-cart flow in this
-// admin-only app, so every one of these is staff-logged, same reasoning as
-// ReturnRequest/Review). Deliberately no note text — a real staff-logged
-// lead is just "these items, this quantity," not an invented backstory.
-async function seedCartLeadExamples(customers: { id: number }[], variantsBySku: Map<string, number>) {
+// interest" section (and the Customers list's "In cart" column) with real
+// variety, not just a handful buried on one page (see cartLead.service.ts
+// — there's no real add-to-cart flow in this admin-only app, so every one
+// of these is staff-logged, same reasoning as ReturnRequest/Review).
+// Deliberately no note text — a real staff-logged lead is just "these
+// items, this quantity," not an invented backstory.
+async function seedCartLeadExamples(
+  customers: { id: number }[],
+  bulkCustomers: { id: number }[],
+  variantsBySku: Map<string, number>
+) {
   const existing = await prisma.cartLead.findFirst({ where: { userId: customers[2]?.id } });
   if (existing) return;
 
@@ -1401,6 +1406,42 @@ async function seedCartLeadExamples(customers: { id: number }[], variantsBySku: 
         userId: customer.id,
         loggedByName: lead.loggedByName,
         createdAt: new Date(Date.now() - lead.days * 24 * 60 * 60 * 1000),
+        items: { create: items },
+      },
+    });
+  }
+
+  // Bulk-pool leads — spreads more examples across the 168
+  // BULK_CUSTOMER_COUNT customers (deterministic via mulberry32, same PRNG
+  // the bulk order generator uses) so "In cart" isn't only visible on the
+  // handful of curated customers above, which tend to sort onto later
+  // pages of the Customers list.
+  const allSkus = Array.from(variantsBySku.keys());
+  const rand = mulberry32(20260901 + 2);
+  const bulkLeadCount = Math.min(14, bulkCustomers.length);
+  const bulkCustomerIndices = new Set<number>();
+  while (bulkCustomerIndices.size < bulkLeadCount) {
+    bulkCustomerIndices.add(Math.floor(rand() * bulkCustomers.length));
+  }
+
+  for (const index of bulkCustomerIndices) {
+    const customer = bulkCustomers[index];
+    const itemCount = 1 + Math.floor(rand() * 3); // 1-3 items per lead
+    const skusForLead = new Set<string>();
+    while (skusForLead.size < itemCount) {
+      skusForLead.add(allSkus[Math.floor(rand() * allSkus.length)]);
+    }
+
+    const items = Array.from(skusForLead)
+      .map((sku) => ({ variantId: variantsBySku.get(sku), quantity: 1 + Math.floor(rand() * 2) }))
+      .filter((line): line is { variantId: number; quantity: number } => line.variantId !== undefined);
+    if (items.length === 0) continue;
+
+    await prisma.cartLead.create({
+      data: {
+        userId: customer.id,
+        loggedByName: rand() > 0.5 ? "Fulfillment Staff" : "Admin",
+        createdAt: new Date(Date.now() - Math.floor(rand() * 14) * 24 * 60 * 60 * 1000),
         items: { create: items },
       },
     });
@@ -2098,7 +2139,7 @@ export async function runSeed(): Promise<string> {
   await seedBulkCustomerProfiles(bulkCustomers);
   const variantsBySku = await seedCatalog();
   await seedOrders(customers, variantsBySku);
-  await seedCartLeadExamples(customers, variantsBySku);
+  await seedCartLeadExamples(customers, bulkCustomers, variantsBySku);
   await seedPartialRefundExample(customers, variantsBySku);
   await seedMoreOrderExamples(customers, variantsBySku);
   await seedReturnRequestExamples(customers, variantsBySku);
@@ -2124,7 +2165,8 @@ export async function runSeed(): Promise<string> {
     `example demonstrating the delete flow), 6 product questions covering unanswered/answered, all ` +
     `${totalCustomers} customers with full profile detail (name/phone/address — ${CUSTOMER_COUNT} hand-picked, ` +
     `${bulkCustomers.length} algorithmically generated), demo card metadata backfilled onto every card-paid ` +
-    `completed order, 6 cart-interest leads across several customers (most holding multiple products), ` +
+    `completed order, 20 cart-interest leads spread across curated and bulk customers (most holding ` +
+    `multiple products), ` +
     `and enabled partial refunds in store settings.`
   );
 }

@@ -9,6 +9,7 @@ const COMPLETED_STATUSES = ["PAID", "SHIPPED", "DELIVERED"] as const;
 
 export interface ListCustomersFilters {
   search?: string;
+  hasCartItems?: boolean;
   page?: number;
 }
 
@@ -16,14 +17,17 @@ export async function listCustomers(filters: ListCustomersFilters = {}) {
   const currentPage = filters.page && filters.page > 0 ? filters.page : 1;
   // Search matches email or name — the only two identifying free-text
   // fields a customer has (see schema.prisma's User model).
-  const where = filters.search
-    ? {
-        OR: [
-          { email: { contains: filters.search } },
-          { name: { contains: filters.search } },
-        ],
-      }
-    : {};
+  const where = {
+    ...(filters.search
+      ? {
+          OR: [{ email: { contains: filters.search } }, { name: { contains: filters.search } }],
+        }
+      : {}),
+    // "some" rather than counting quantity here — a lead with any items at
+    // all counts, the actual quantity total is computed below per row for
+    // display, not for this filter.
+    ...(filters.hasCartItems ? { cartLeads: { some: {} } } : {}),
+  };
 
   const [users, total] = await Promise.all([
     prisma.user.findMany({

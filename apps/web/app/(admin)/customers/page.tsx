@@ -9,20 +9,21 @@ export default function CustomersPage() {
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [pagination, setPagination] = useState({ page: 1, pageSize: 20, total: 0, totalPages: 1 });
   const [search, setSearch] = useState("");
+  const [hasCartItems, setHasCartItems] = useState(false);
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     setLoading(true);
-    fetchCustomers(page, search || undefined)
+    fetchCustomers(page, search || undefined, hasCartItems || undefined)
       .then((result) => {
         setCustomers(result.customers);
         setPagination(result.pagination);
       })
       .catch((err) => setError(err instanceof Error ? err.message : "Failed to load customers."))
       .finally(() => setLoading(false));
-  }, [page, search]);
+  }, [page, search, hasCartItems]);
 
   return (
     <div>
@@ -31,18 +32,32 @@ export default function CustomersPage() {
       </div>
 
       <div className="mt-6 rounded-xl border border-ink-100 bg-white">
-        <div className="flex items-center justify-between border-b border-ink-100 px-5 py-4">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-ink-100 px-5 py-4">
           <p className="text-sm font-medium text-ink-900">Customers ({pagination.total})</p>
-          <input
-            type="text"
-            value={search}
-            onChange={(e) => {
-              setSearch(e.target.value);
-              setPage(1);
-            }}
-            placeholder="Search by email or name..."
-            className="rounded-md border border-ink-100 bg-gray-50 px-3 py-1.5 text-sm outline-none focus:border-brand-500 focus:bg-white focus:ring-1 focus:ring-brand-500"
-          />
+          <div className="flex items-center gap-3">
+            <label className="flex items-center gap-1.5 text-sm text-ink-700">
+              <input
+                type="checkbox"
+                checked={hasCartItems}
+                onChange={(e) => {
+                  setHasCartItems(e.target.checked);
+                  setPage(1);
+                }}
+                className="h-4 w-4"
+              />
+              Has cart items
+            </label>
+            <input
+              type="text"
+              value={search}
+              onChange={(e) => {
+                setSearch(e.target.value);
+                setPage(1);
+              }}
+              placeholder="Search by email or name..."
+              className="rounded-md border border-ink-100 bg-gray-50 px-3 py-1.5 text-sm outline-none focus:border-brand-500 focus:bg-white focus:ring-1 focus:ring-brand-500"
+            />
+          </div>
         </div>
 
         {error ? (
@@ -51,7 +66,7 @@ export default function CustomersPage() {
           <p className="px-5 py-8 text-center text-sm text-ink-500">Loading...</p>
         ) : customers.length === 0 ? (
           <p className="px-5 py-8 text-center text-sm text-ink-500">
-            {search ? "No customers match your search." : "No customers yet."}
+            {search || hasCartItems ? "No customers match your filters." : "No customers yet."}
           </p>
         ) : (
           <div className="overflow-x-auto">
