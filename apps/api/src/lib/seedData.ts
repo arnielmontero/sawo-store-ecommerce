@@ -1633,12 +1633,14 @@ async function seedReviewAndQuestionExamples() {
       answeredByName: "Fulfillment Staff",
       days: 7,
       answeredDays: 6,
+      linkToReviewer: true,
     },
     {
       slug: "barrel-sauna-wood-heater",
       authorName: "Hannah S.",
       question: "Is the barrel heater rated for outdoor/uncovered installation, or does it need a roof over it?",
       days: 4,
+      linkToReviewer: true,
     },
     {
       slug: "innova-touch-control-panel",
@@ -1648,12 +1650,14 @@ async function seedReviewAndQuestionExamples() {
       answeredByName: "Admin",
       days: 13,
       answeredDays: 12,
+      linkToReviewer: true,
     },
     {
       slug: "frameless-glass-sauna-door",
       authorName: "Miriam A.",
       question: "What's the standard rough opening size this door is built for?",
       days: 2,
+      linkToReviewer: true,
     },
     {
       slug: "abachi-wood-sauna-bench-set",
@@ -1663,6 +1667,7 @@ async function seedReviewAndQuestionExamples() {
       answeredByName: "Fulfillment Staff",
       days: 17,
       answeredDays: 15,
+      linkToReviewer: true,
     },
   ];
   for (const q of questions) {

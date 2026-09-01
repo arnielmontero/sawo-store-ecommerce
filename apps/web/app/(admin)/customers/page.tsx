@@ -10,20 +10,21 @@ export default function CustomersPage() {
   const [pagination, setPagination] = useState({ page: 1, pageSize: 20, total: 0, totalPages: 1 });
   const [search, setSearch] = useState("");
   const [hasCartItems, setHasCartItems] = useState(false);
+  const [hasFeedback, setHasFeedback] = useState(false);
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     setLoading(true);
-    fetchCustomers(page, search || undefined, hasCartItems || undefined)
+    fetchCustomers(page, search || undefined, hasCartItems || undefined, hasFeedback || undefined)
       .then((result) => {
         setCustomers(result.customers);
         setPagination(result.pagination);
       })
       .catch((err) => setError(err instanceof Error ? err.message : "Failed to load customers."))
       .finally(() => setLoading(false));
-  }, [page, search, hasCartItems]);
+  }, [page, search, hasCartItems, hasFeedback]);
 
   return (
     <div>
@@ -47,6 +48,18 @@ export default function CustomersPage() {
               />
               Has cart items
             </label>
+            <label className="flex items-center gap-1.5 text-sm text-ink-700">
+              <input
+                type="checkbox"
+                checked={hasFeedback}
+                onChange={(e) => {
+                  setHasFeedback(e.target.checked);
+                  setPage(1);
+                }}
+                className="h-4 w-4"
+              />
+              Has feedback
+            </label>
             <input
               type="text"
               value={search}
@@ -66,7 +79,7 @@ export default function CustomersPage() {
           <p className="px-5 py-8 text-center text-sm text-ink-500">Loading...</p>
         ) : customers.length === 0 ? (
           <p className="px-5 py-8 text-center text-sm text-ink-500">
-            {search || hasCartItems ? "No customers match your filters." : "No customers yet."}
+            {search || hasCartItems || hasFeedback ? "No customers match your filters." : "No customers yet."}
           </p>
         ) : (
           <div className="overflow-x-auto">

@@ -15,12 +15,13 @@ const listQuerySchema = z.object({
   page: z.coerce.number().int().positive().optional(),
   search: z.string().optional(),
   hasCartItems: z.coerce.boolean().optional(),
+  hasFeedback: z.coerce.boolean().optional(),
 });
 
 customersRouter.get("/", async (req, res, next) => {
   try {
-    const { page, search, hasCartItems } = listQuerySchema.parse(req.query);
-    const result = await listCustomers({ page, search, hasCartItems });
+    const { page, search, hasCartItems, hasFeedback } = listQuerySchema.parse(req.query);
+    const result = await listCustomers({ page, search, hasCartItems, hasFeedback });
     res.json(result);
   } catch (err) {
     next(err);

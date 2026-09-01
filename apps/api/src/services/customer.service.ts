@@ -10,6 +10,7 @@ const COMPLETED_STATUSES = ["PAID", "SHIPPED", "DELIVERED"] as const;
 export interface ListCustomersFilters {
   search?: string;
   hasCartItems?: boolean;
+  hasFeedback?: boolean;
   page?: number;
 }
 
@@ -17,17 +18,26 @@ export async function listCustomers(filters: ListCustomersFilters = {}) {
   const currentPage = filters.page && filters.page > 0 ? filters.page : 1;
   // Search matches email or name — the only two identifying free-text
   // fields a customer has (see schema.prisma's User model).
-  const where = {
-    ...(filters.search
-      ? {
-          OR: [{ email: { contains: filters.search } }, { name: { contains: filters.search } }],
-        }
-      : {}),
+  // Each filter that needs its own OR (search, hasFeedback) is nested under
+  // Prisma's AND array instead of spread directly — spreading two objects
+  // that both set a top-level "OR" key would silently let the second
+  // overwrite the first, dropping whichever filter lost that collision.
+  const andConditions: object[] = [];
+  if (filters.search) {
+    andConditions.push({ OR: [{ email: { contains: filters.search } }, { name: { contains: filters.search } }] });
+  }
+  if (filters.hasCartItems) {
     // "some" rather than counting quantity here — a lead with any items at
     // all counts, the actual quantity total is computed below per row for
     // display, not for this filter.
-    ...(filters.hasCartItems ? { cartLeads: { some: {} } } : {}),
-  };
+    andConditions.push({ cartLeads: { some: {} } });
+  }
+  if (filters.hasFeedback) {
+    // A customer with either a review or a question (or both) counts,
+    // matching what the "Feedback" column actually sums.
+    andConditions.push({ OR: [{ reviews: { some: {} } }, { questions: { some: {} } }] });
+  }
+  const where = andConditions.length > 0 ? { AND: andConditions } : {};
 
   const [users, total] = await Promise.all([
     prisma.user.findMany({

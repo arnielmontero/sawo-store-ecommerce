@@ -754,11 +754,13 @@ export async function rejectReturnRequest(requestId: number, reviewNote?: string
 export async function fetchCustomers(
   page = 1,
   search?: string,
-  hasCartItems?: boolean
+  hasCartItems?: boolean,
+  hasFeedback?: boolean
 ): Promise<CustomersPage> {
   const query = new URLSearchParams({ page: String(page) });
   if (search) query.set("search", search);
   if (hasCartItems) query.set("hasCartItems", "true");
+  if (hasFeedback) query.set("hasFeedback", "true");
   return apiFetch(`/api/v1/customers?${query.toString()}`);
 }
 
