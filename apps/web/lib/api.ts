@@ -240,6 +240,23 @@ export interface OrderDetail {
     createdAt: string;
     items: { id: number; orderItemId: number; quantity: number }[];
   }[];
+  returnRequests: ReturnRequest[];
+}
+
+export type ReturnRequestStatus = "PENDING" | "APPROVED" | "REJECTED";
+
+export interface ReturnRequest {
+  id: number;
+  orderId: number;
+  status: ReturnRequestStatus;
+  reason: string;
+  loggedByName: string;
+  createdAt: string;
+  resolvedByName: string | null;
+  resolvedAt: string | null;
+  reviewNote: string | null;
+  refundRecordId: number | null;
+  items: { id: number; orderItemId: number; quantity: number }[];
 }
 
 export interface Payment {
@@ -596,6 +613,37 @@ export async function addOrderNote(id: number, body: string): Promise<OrderDetai
   const data = await apiFetch(`/api/orders/${id}/notes`, {
     method: "POST",
     body: JSON.stringify({ body }),
+  });
+  return data.order;
+}
+
+export async function logReturnRequest(
+  orderId: number,
+  reason: string,
+  items: { orderItemId: number; quantity: number }[]
+): Promise<OrderDetail> {
+  const data = await apiFetch(`/api/orders/${orderId}/return-requests`, {
+    method: "POST",
+    body: JSON.stringify({ reason, items }),
+  });
+  return data.order;
+}
+
+export async function approveReturnRequest(
+  requestId: number,
+  options?: { amountCents?: number; reviewNote?: string }
+): Promise<OrderDetail> {
+  const data = await apiFetch(`/api/orders/return-requests/${requestId}/approve`, {
+    method: "POST",
+    body: JSON.stringify(options ?? {}),
+  });
+  return data.order;
+}
+
+export async function rejectReturnRequest(requestId: number, reviewNote?: string): Promise<OrderDetail> {
+  const data = await apiFetch(`/api/orders/return-requests/${requestId}/reject`, {
+    method: "POST",
+    body: JSON.stringify({ reviewNote }),
   });
   return data.order;
 }

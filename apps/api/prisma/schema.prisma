@@ -305,9 +305,10 @@ model Order {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  statusHistory OrderStatusHistory[]
-  refunds       RefundRecord[]
-  notes         OrderNote[]
+  statusHistory  OrderStatusHistory[]
+  refunds        RefundRecord[]
+  notes          OrderNote[]
+  returnRequests ReturnRequest[]
 
   @@index([status])
   @@index([userId])
@@ -326,7 +327,8 @@ model RefundRecord {
   stripeRefundId String?
   createdAt      DateTime @default(now())
 
-  items RefundRecordItem[]
+  items         RefundRecordItem[]
+  returnRequest ReturnRequest?
 
   @@index([orderId])
 }
@@ -363,6 +365,67 @@ model OrderNote {
   @@index([orderId])
 }
 
+// A customer asking to return/refund items is its own step BEFORE any money
+// or stock moves — distinct from RefundRecord, which only ever represents a
+// refund that has actually happened. There's no live customer session in
+// this system yet (see checkout()), so a request is logged by staff on the
+// customer's behalf (phone/email), not submitted directly by the customer.
+enum ReturnRequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+model ReturnRequest {
+  id           Int                 @id @default(autoincrement())
+  order        Order               @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  orderId      Int
+  status       ReturnRequestStatus @default(PENDING)
+  // Why the customer wants to return/refund — required, shown throughout
+  // the review flow so an admin never has to go dig it up from elsewhere.
+  reason       String              @db.Text
+  // Snapshot of who logged it and when — same pattern as OrderNote, kept
+  // as plain strings rather than hard FKs so the record stays legible if
+  // that admin account is later removed.
+  loggedByName String
+  createdAt    DateTime            @default(now())
+
+  // Set once an ADMIN reviews the request — resolvedByName is null while
+  // PENDING. reviewNote captures why it was rejected, or any context on
+  // approval (e.g. "approved, see refund RE-...").
+  resolvedByName String?
+  resolvedAt     DateTime?
+  reviewNote     String?   @db.Text
+
+  // Only set once approval actually triggers a real refund (see
+  // returnRequest.service.ts) — links the request to the RefundRecord it
+  // produced, so "what happened as a result of this request" is a straight
+  // lookup instead of matching timestamps.
+  refundRecord   RefundRecord? @relation(fields: [refundRecordId], references: [id])
+  refundRecordId Int?          @unique
+
+  items ReturnRequestItem[]
+
+  @@index([orderId])
+  @@index([status])
+}
+
+// Which order item/quantity the customer wants to return — mirrors
+// RefundRecordItem's shape (variant-level quantity, not just a dollar
+// amount) so an approved request can hand its exact items straight to the
+// existing partial-refund restock logic.
+model ReturnRequestItem {
+  id              Int           @id @default(autoincrement())
+  returnRequest   ReturnRequest @relation(fields: [returnRequestId], references: [id], onDelete: Cascade)
+  returnRequestId Int
+  orderItem       OrderItem     @relation(fields: [orderItemId], references: [id], onDelete: Cascade)
+  orderItemId     Int
+  quantity        Int
+
+  @@index([returnRequestId])
+  @@index([orderItemId])
+}
+
 // One row per status transition — Order.updatedAt only ever reflects the
 // MOST RECENT change, so once an order has gone PENDING -> PAID -> SHIPPED,
 // there's no other way to answer "when was this paid?" once it's shipped.
@@ -386,7 +449,8 @@ model OrderItem {
   quantity       Int
   unitPriceCents Int
 
-  refundItems RefundRecordItem[]
+  refundItems        RefundRecordItem[]
+  returnRequestItems ReturnRequestItem[]
 
   @@index([orderId])
   @@index([variantId])

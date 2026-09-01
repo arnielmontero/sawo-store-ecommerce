@@ -69,7 +69,7 @@ const refundSchema = z.object({
 paymentsRouter.post("/refund", requireAuth, requireRole(AdminRole.ADMIN), async (req, res, next) => {
   try {
     const { orderId, amountCents, items } = refundSchema.parse(req.body);
-    const order = await refundOrder(orderId, { amountCents, items });
+    const { order } = await refundOrder(orderId, { amountCents, items });
     res.json({ order });
   } catch (err) {
     next(err);

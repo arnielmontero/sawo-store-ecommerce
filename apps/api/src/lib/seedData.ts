@@ -1,4 +1,4 @@
-import { OrderStatus, PaymentMethod, AdminRole, StockAdjustmentReason } from "@prisma/client";
+import { OrderStatus, PaymentMethod, AdminRole, StockAdjustmentReason, ReturnRequestStatus } from "@prisma/client";
 import { prisma } from "./prisma";
 import { hashPassword } from "./password";
 
@@ -864,6 +864,213 @@ async function seedMoreOrderExamples(customers: { id: number }[], variantsBySku:
   }
 }
 
+// Three DELIVERED orders demonstrating every ReturnRequestStatus end to
+// end — PENDING (sitting for review, nothing has moved yet), APPROVED
+// (built by hand with a real RefundRecord, the same way
+// seedPartialRefundExample fakes a completed Stripe refund, since a live
+// Stripe key isn't available in this environment), and REJECTED (money and
+// stock both untouched). Kept separate from seedMoreOrderExamples for the
+// same reason that one is separate from the flat ORDERS table — this needs
+// ReturnRequest/ReturnRequestItem rows that table doesn't carry.
+async function seedReturnRequestExamples(customers: { id: number }[], variantsBySku: Map<string, number>) {
+  const existing = await prisma.order.findFirst({ where: { reference: "SAW-RET-0001" } });
+  if (existing) return;
+
+  const priceBySku = new Map(
+    PRODUCTS.flatMap((product) => product.variants.map((v) => [v.sku, v.priceCents] as const))
+  );
+
+  // Order 1: PENDING — customer says the control panel arrived defective,
+  // staff logged it, nobody's reviewed it yet. Order stays DELIVERED; no
+  // money or stock has moved.
+  {
+    const panelSku = "CTL-TOUCH-BLK";
+    const panelPriceCents = priceBySku.get(panelSku)!;
+    const subtotalCents = panelPriceCents;
+
+    const placedAt = new Date(Date.now() - 9 * 24 * 60 * 60 * 1000);
+    const paidAt = new Date(placedAt.getTime() + 12 * 60 * 1000);
+    const shippedAt = new Date(placedAt.getTime() + 1 * 24 * 60 * 60 * 1000);
+    const deliveredAt = new Date(placedAt.getTime() + 3 * 24 * 60 * 60 * 1000);
+    const requestedAt = new Date(Date.now() - 1 * 24 * 60 * 60 * 1000);
+
+    const order = await prisma.order.create({
+      data: {
+        reference: "SAW-RET-0001",
+        status: OrderStatus.DELIVERED,
+        paymentMethod: PaymentMethod.CARD,
+        isNewClient: true,
+        userId: customers[1].id,
+        subtotalCents,
+        totalCents: subtotalCents,
+        stripePaymentIntentId: "pi_seed_016",
+        paymentAttemptCount: 1,
+        shippingAddress: ADDRESSES[0],
+        createdAt: placedAt,
+        items: { create: [{ variantId: variantsBySku.get(panelSku)!, quantity: 1, unitPriceCents: panelPriceCents }] },
+        statusHistory: {
+          create: [
+            { status: OrderStatus.PENDING, changedAt: placedAt },
+            { status: OrderStatus.PAID, changedAt: paidAt },
+            { status: OrderStatus.SHIPPED, changedAt: shippedAt },
+            { status: OrderStatus.DELIVERED, changedAt: deliveredAt },
+          ],
+        },
+      },
+      include: { items: true },
+    });
+
+    await prisma.returnRequest.create({
+      data: {
+        orderId: order.id,
+        reason: "Touch panel doesn't power on — customer confirmed outlet and breaker are fine.",
+        loggedByName: "Fulfillment Staff",
+        createdAt: requestedAt,
+        items: { create: { orderItemId: order.items[0].id, quantity: 1 } },
+      },
+    });
+  }
+
+  // Order 2: APPROVED — customer returned a bag of stones as the wrong
+  // type, staff reviewed and approved it. Built by hand with a completed
+  // RefundRecord/restock (same reasoning as seedPartialRefundExample: no
+  // live Stripe key here to actually process it), landing the order on
+  // PARTIALLY_REFUNDED since only one of the two items is refunded.
+  {
+    const heaterSku = "HTR-NORD-8KW";
+    const stoneSku = "STN-PERI-44LB";
+    const heaterPriceCents = priceBySku.get(heaterSku)!;
+    const stonePriceCents = priceBySku.get(stoneSku)!;
+    const subtotalCents = heaterPriceCents + stonePriceCents;
+
+    const placedAt = new Date(Date.now() - 15 * 24 * 60 * 60 * 1000);
+    const paidAt = new Date(placedAt.getTime() + 8 * 60 * 1000);
+    const shippedAt = new Date(placedAt.getTime() + 1 * 24 * 60 * 60 * 1000);
+    const deliveredAt = new Date(placedAt.getTime() + 4 * 24 * 60 * 60 * 1000);
+    const requestedAt = new Date(Date.now() - 6 * 24 * 60 * 60 * 1000);
+    const resolvedAt = new Date(Date.now() - 5 * 24 * 60 * 60 * 1000);
+
+    const order = await prisma.order.create({
+      data: {
+        reference: "SAW-RET-0002",
+        status: OrderStatus.PARTIALLY_REFUNDED,
+        paymentMethod: PaymentMethod.CARD,
+        isNewClient: false,
+        userId: customers[4].id,
+        subtotalCents,
+        totalCents: subtotalCents,
+        refundedCents: stonePriceCents,
+        stripePaymentIntentId: "pi_seed_017",
+        paymentAttemptCount: 1,
+        shippingAddress: ADDRESSES[3],
+        createdAt: placedAt,
+        items: {
+          create: [
+            { variantId: variantsBySku.get(heaterSku)!, quantity: 1, unitPriceCents: heaterPriceCents },
+            { variantId: variantsBySku.get(stoneSku)!, quantity: 1, unitPriceCents: stonePriceCents },
+          ],
+        },
+        statusHistory: {
+          create: [
+            { status: OrderStatus.PENDING, changedAt: placedAt },
+            { status: OrderStatus.PAID, changedAt: paidAt },
+            { status: OrderStatus.SHIPPED, changedAt: shippedAt },
+            { status: OrderStatus.DELIVERED, changedAt: deliveredAt },
+            { status: OrderStatus.PARTIALLY_REFUNDED, changedAt: resolvedAt },
+          ],
+        },
+      },
+      include: { items: true },
+    });
+
+    const stoneItem = order.items.find((item) => item.variantId === variantsBySku.get(stoneSku))!;
+
+    const refundRecord = await prisma.refundRecord.create({
+      data: {
+        orderId: order.id,
+        amountCents: stonePriceCents,
+        stripeRefundId: "re_seed_006",
+        createdAt: resolvedAt,
+        items: { create: { orderItemId: stoneItem.id, quantity: 1 } },
+      },
+    });
+
+    await prisma.returnRequest.create({
+      data: {
+        orderId: order.id,
+        status: ReturnRequestStatus.APPROVED,
+        reason: "Customer ordered the wrong stone type (Peridotite instead of Olivine Diabase) — keeping the heater.",
+        loggedByName: "Admin",
+        createdAt: requestedAt,
+        resolvedByName: "Admin",
+        resolvedAt,
+        reviewNote: "Confirmed unopened, approved full refund for the stones.",
+        refundRecordId: refundRecord.id,
+        items: { create: { orderItemId: stoneItem.id, quantity: 1 } },
+      },
+    });
+  }
+
+  // Order 3: REJECTED — customer asked to return a bucket set well past a
+  // reasonable window with signs of use; staff rejected it. Order stays
+  // DELIVERED, no money or stock moved.
+  {
+    const bucketSku = "ACC-BUCKET-CDR";
+    const bucketPriceCents = priceBySku.get(bucketSku)!;
+    const bucketQuantity = 2;
+    const subtotalCents = bucketPriceCents * bucketQuantity;
+
+    const placedAt = new Date(Date.now() - 60 * 24 * 60 * 60 * 1000);
+    const paidAt = new Date(placedAt.getTime() + 5 * 60 * 1000);
+    const shippedAt = new Date(placedAt.getTime() + 1 * 24 * 60 * 60 * 1000);
+    const deliveredAt = new Date(placedAt.getTime() + 3 * 24 * 60 * 60 * 1000);
+    const requestedAt = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000);
+    const resolvedAt = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000);
+
+    const order = await prisma.order.create({
+      data: {
+        reference: "SAW-RET-0003",
+        status: OrderStatus.DELIVERED,
+        paymentMethod: PaymentMethod.BANK,
+        isNewClient: false,
+        userId: customers[7].id,
+        subtotalCents,
+        totalCents: subtotalCents,
+        stripePaymentIntentId: "pi_seed_018",
+        paymentAttemptCount: 1,
+        shippingAddress: ADDRESSES[2],
+        createdAt: placedAt,
+        items: {
+          create: [{ variantId: variantsBySku.get(bucketSku)!, quantity: bucketQuantity, unitPriceCents: bucketPriceCents }],
+        },
+        statusHistory: {
+          create: [
+            { status: OrderStatus.PENDING, changedAt: placedAt },
+            { status: OrderStatus.PAID, changedAt: paidAt },
+            { status: OrderStatus.SHIPPED, changedAt: shippedAt },
+            { status: OrderStatus.DELIVERED, changedAt: deliveredAt },
+          ],
+        },
+      },
+      include: { items: true },
+    });
+
+    await prisma.returnRequest.create({
+      data: {
+        orderId: order.id,
+        status: ReturnRequestStatus.REJECTED,
+        reason: "Customer says the buckets are the wrong shade of cedar and wants a refund.",
+        loggedByName: "Fulfillment Staff",
+        createdAt: requestedAt,
+        resolvedByName: "Admin",
+        resolvedAt,
+        reviewNote: "Delivered almost 2 months ago and shows signs of use in the photos provided — outside our return window, declined.",
+        items: { create: { orderItemId: order.items[0].id, quantity: bucketQuantity } },
+      },
+    });
+  }
+}
+
 // Order notes on a couple of the plain flat-seeded orders (not just the
 // hand-built refund examples) so the Notes UI shows realistic non-refund
 // use too — shipping instructions, delivery follow-ups, etc.
@@ -1277,6 +1484,7 @@ export async function runSeed(): Promise<string> {
   await seedOrders(customers, variantsBySku);
   await seedPartialRefundExample(customers, variantsBySku);
   await seedMoreOrderExamples(customers, variantsBySku);
+  await seedReturnRequestExamples(customers, variantsBySku);
   await seedNotesOnExistingOrders();
   await seedBulkOrders([...customers, ...bulkCustomers], variantsBySku);
   await backfillStockAdjustmentHistory();
@@ -1284,11 +1492,12 @@ export async function runSeed(): Promise<string> {
   const productCount = PRODUCTS.length;
   const variantCount = PRODUCTS.reduce((sum, p) => sum + p.variants.length, 0);
   const totalCustomers = customers.length + bulkCustomers.length;
-  const totalOrders = ORDERS.length + 3 + BULK_ORDER_COUNT;
+  const totalOrders = ORDERS.length + 6 + BULK_ORDER_COUNT;
   return (
     `Seeded admin user (admin / admin123), staff user (staff / staff123), ${totalCustomers} customers, ` +
     `${CATEGORIES.length} categories, ${productCount} products (${variantCount} variants), ${totalOrders} orders total ` +
-    `(${BULK_ORDER_COUNT} bulk-generated over the past 12 months, plus 3 hand-crafted refund examples and ` +
-    `${ORDERS.length} curated demo orders), 4 order notes, and enabled partial refunds in store settings.`
+    `(${BULK_ORDER_COUNT} bulk-generated over the past 12 months, 3 hand-crafted refund examples, 3 return-request ` +
+    `examples covering pending/approved/rejected, and ${ORDERS.length} curated demo orders), 4 order notes, and ` +
+    `enabled partial refunds in store settings.`
   );
 }

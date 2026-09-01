@@ -208,6 +208,7 @@ export async function getOrderById(id: number) {
       statusHistory: { orderBy: { changedAt: "asc" } },
       notes: { orderBy: { createdAt: "desc" } },
       refunds: { include: { items: true }, orderBy: { createdAt: "desc" } },
+      returnRequests: { include: { items: true }, orderBy: { createdAt: "desc" } },
     },
   });
 }

@@ -16,6 +16,7 @@ import {
   listOrders,
   updateOrderStatus,
 } from "../services/order.service";
+import { approveReturnRequest, logReturnRequest, rejectReturnRequest } from "../services/returnRequest.service";
 
 export const ordersRouter = Router();
 
@@ -146,6 +147,78 @@ ordersRouter.post("/:id/notes", async (req, res, next) => {
     next(err);
   }
 });
+
+const logReturnRequestSchema = z.object({
+  reason: z.string().min(1).max(2000),
+  items: z
+    .array(z.object({ orderItemId: z.number().int().positive(), quantity: z.number().int().positive() }))
+    .min(1),
+});
+
+// Admin or Fulfillment Staff can log what a customer asked for (there's no
+// live customer session yet — see checkout()), same reasoning as order
+// notes/status transitions: this just records what was relayed, it doesn't
+// move money on its own.
+ordersRouter.post(
+  "/:id/return-requests",
+  requireRole(AdminRole.ADMIN, AdminRole.FULFILLMENT_STAFF),
+  async (req, res, next) => {
+    try {
+      const orderId = Number(req.params.id);
+      const { reason, items } = logReturnRequestSchema.parse(req.body);
+      const admin = await prisma.adminUser.findUnique({ where: { id: req.adminAuth!.userId } });
+      if (!admin) throw new HttpError(401, "Unauthorized");
+      const order = await logReturnRequest({ orderId, reason, items, loggedByName: admin.name });
+      res.status(201).json({ order });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+const approveReturnRequestSchema = z.object({
+  amountCents: z.number().int().positive().optional(),
+  reviewNote: z.string().max(2000).optional(),
+});
+
+// ADMIN-only — this is the step that actually moves money (via the same
+// refundOrder() a plain refund uses), held to the same bar as the existing
+// refund endpoint.
+ordersRouter.post(
+  "/return-requests/:requestId/approve",
+  requireRole(AdminRole.ADMIN),
+  async (req, res, next) => {
+    try {
+      const requestId = Number(req.params.requestId);
+      const { amountCents, reviewNote } = approveReturnRequestSchema.parse(req.body);
+      const admin = await prisma.adminUser.findUnique({ where: { id: req.adminAuth!.userId } });
+      if (!admin) throw new HttpError(401, "Unauthorized");
+      const order = await approveReturnRequest(requestId, { amountCents, reviewNote, resolvedByName: admin.name });
+      res.json({ order });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+const rejectReturnRequestSchema = z.object({ reviewNote: z.string().max(2000).optional() });
+
+ordersRouter.post(
+  "/return-requests/:requestId/reject",
+  requireRole(AdminRole.ADMIN),
+  async (req, res, next) => {
+    try {
+      const requestId = Number(req.params.requestId);
+      const { reviewNote } = rejectReturnRequestSchema.parse(req.body);
+      const admin = await prisma.adminUser.findUnique({ where: { id: req.adminAuth!.userId } });
+      if (!admin) throw new HttpError(401, "Unauthorized");
+      const order = await rejectReturnRequest(requestId, reviewNote ?? "", admin.name);
+      res.json({ order });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
 
 const updateStatusSchema = z.object({ status: z.nativeEnum(OrderStatus) });
 

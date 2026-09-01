@@ -116,7 +116,15 @@ export interface RefundInput {
   items?: { orderItemId: number; quantity: number }[];
 }
 
-const REFUNDABLE_STATUSES: OrderStatus[] = [OrderStatus.PAID, OrderStatus.SHIPPED, OrderStatus.PARTIALLY_REFUNDED];
+// DELIVERED is included because "it arrived and the customer wants to
+// return/refund it" is the single most common real-world return case — a
+// refund isn't limited to orders still in flight.
+const REFUNDABLE_STATUSES: OrderStatus[] = [
+  OrderStatus.PAID,
+  OrderStatus.SHIPPED,
+  OrderStatus.DELIVERED,
+  OrderStatus.PARTIALLY_REFUNDED,
+];
 
 export async function refundOrder(orderId: number, input: RefundInput = {}) {
   const order = await prisma.order.findUnique({
@@ -208,20 +216,17 @@ export async function refundOrder(orderId: number, input: RefundInput = {}) {
   const newRefundedCents = order.refundedCents + amountCents;
   const nextStatus = newRefundedCents >= order.totalCents ? OrderStatus.REFUNDED : OrderStatus.PARTIALLY_REFUNDED;
 
-  await prisma.order.update({
-    where: { id: orderId },
+  const createdRefund = await prisma.refundRecord.create({
     data: {
-      refundedCents: newRefundedCents,
-      refunds: {
-        create: {
-          amountCents,
-          stripeRefundId: stripeRefund.id,
-          items: { create: restockLines.map((line) => ({ orderItemId: line.orderItemId, quantity: line.quantity })) },
-        },
-      },
+      orderId,
+      amountCents,
+      stripeRefundId: stripeRefund.id,
+      items: { create: restockLines.map((line) => ({ orderItemId: line.orderItemId, quantity: line.quantity })) },
     },
   });
+  await prisma.order.update({ where: { id: orderId }, data: { refundedCents: newRefundedCents } });
 
   await setOrderStatus(orderId, nextStatus);
-  return getOrderById(orderId);
+  const updatedOrder = await getOrderById(orderId);
+  return { order: updatedOrder, refundRecordId: createdRefund.id };
 }

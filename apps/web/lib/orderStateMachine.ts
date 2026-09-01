@@ -7,7 +7,9 @@ export const NEXT_STATES: Record<OrderStatus, OrderStatus[]> = {
   PENDING: ["PAID", "CANCELLED"],
   PAID: ["SHIPPED", "REFUNDED"],
   SHIPPED: ["DELIVERED", "RETURNED", "REFUNDED"],
-  DELIVERED: [],
+  // "It arrived and the customer wants a refund" is the most common
+  // real-world return case — delivery doesn't close off refunding.
+  DELIVERED: ["REFUNDED"],
   CANCELLED: [],
   REFUNDED: [],
   RETURNED: [],

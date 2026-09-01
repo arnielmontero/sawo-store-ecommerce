@@ -10,6 +10,7 @@ import { useAuth } from "@/lib/auth-context";
 import { useStoreSettings } from "@/lib/store-settings-context";
 import { NEXT_STATES, ACTION_LABELS, STATUS_HISTORY_LABELS } from "@/lib/orderStateMachine";
 import { RefundPanel } from "@/components/RefundPanel";
+import { ReturnRequestsCard } from "@/components/ReturnRequestsCard";
 
 export default function OrderDetailPage() {
   const params = useParams<{ id: string }>();
@@ -77,6 +78,7 @@ export default function OrderDetailPage() {
   if (!order) return null;
 
   const canStaffAct = user?.role === "ADMIN" || user?.role === "FULFILLMENT_STAFF";
+  const canReviewReturns = user?.role === "ADMIN";
 
   return (
     <div>
@@ -307,6 +309,13 @@ export default function OrderDetailPage() {
           )}
         </div>
       </div>
+
+      <ReturnRequestsCard
+        order={order}
+        canLog={canStaffAct}
+        canReview={canReviewReturns}
+        onUpdated={setOrder}
+      />
     </div>
   );
 }
