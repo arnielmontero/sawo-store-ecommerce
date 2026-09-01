@@ -7,6 +7,7 @@ import { priceCart, type CartLine } from "./pricing.service";
 import { reserveStock, releaseStock, commitReservedStock, restockCommittedStock } from "./inventory.service";
 import { resolveStaleOrderNotifications } from "./notification.service";
 import { assignCarrier } from "./carrier.service";
+import { isPaymentMethodAllowed } from "./paymentMethodRule.service";
 
 const PAGE_SIZE = 20;
 
@@ -246,6 +247,13 @@ export interface CheckoutInput {
 // else), every reservation already made in this call is rolled back so a
 // failed checkout never leaves partial stock held.
 export async function checkout(input: CheckoutInput) {
+  if (!(await isPaymentMethodAllowed(input.shippingCountry, input.paymentMethod))) {
+    throw new HttpError(
+      409,
+      `${input.paymentMethod} is not an accepted payment method for ${input.shippingCountry}`
+    );
+  }
+
   const pricing = await priceCart(input.items);
 
   const reservedSoFar: CartLine[] = [];

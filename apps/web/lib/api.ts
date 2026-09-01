@@ -318,6 +318,12 @@ export interface CarrierRule {
   carrier: string;
 }
 
+export interface PaymentMethodRule {
+  id: number;
+  country: string;
+  paymentMethod: PaymentMethod;
+}
+
 export interface OrderDetailItem {
   id: number;
   variantId: number;
@@ -819,6 +825,21 @@ export async function upsertCarrierRule(country: string, carrier: string): Promi
 
 export async function deleteCarrierRule(id: number): Promise<void> {
   await apiFetch(`/api/v1/carrier-rules/${id}`, { method: "DELETE" });
+}
+
+export async function fetchPaymentMethodRules(): Promise<PaymentMethodRule[]> {
+  const data = await apiFetch("/api/v1/payment-method-rules");
+  return data.rules;
+}
+
+// Replaces the full allowed-method set for a country — pass an empty array
+// to clear the rule (back to "every method accepted" for that country).
+export async function setPaymentMethodRules(country: string, methods: PaymentMethod[]): Promise<PaymentMethodRule[]> {
+  const data = await apiFetch(`/api/v1/payment-method-rules/${country}`, {
+    method: "PUT",
+    body: JSON.stringify({ methods }),
+  });
+  return data.rules;
 }
 
 export async function fetchPayments(): Promise<Payment[]> {

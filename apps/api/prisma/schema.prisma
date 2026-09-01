@@ -699,3 +699,18 @@ model CarrierRule {
   country String @unique // ISO 3166-1 alpha-2, e.g. "US"
   carrier String // e.g. "UPS", "DHL", "FedEx", "USPS"
 }
+
+// Country -> accepted payment method rules, editable from Configuration.
+// One row per (country, method) pair rather than a joined string so
+// "is CARD allowed in DE" is a plain indexed lookup. A country with NO rows
+// here has no restriction — every PaymentMethod is accepted — matching how
+// this store behaves today before any rule is ever added (see
+// paymentMethodRule.service.ts's isPaymentMethodAllowed).
+model PaymentMethodRule {
+  id            Int           @id @default(autoincrement())
+  country       String // ISO 3166-1 alpha-2, e.g. "US"
+  paymentMethod PaymentMethod
+
+  @@unique([country, paymentMethod])
+  @@index([country])
+}

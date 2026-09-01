@@ -10,9 +10,13 @@ import {
   fetchCarrierRules,
   upsertCarrierRule,
   deleteCarrierRule,
+  fetchPaymentMethodRules,
+  setPaymentMethodRules,
   clearAllData,
   resetSeedData,
   type CarrierRule,
+  type PaymentMethodRule,
+  type PaymentMethod,
 } from "@/lib/api";
 import { useStoreSettings } from "@/lib/store-settings-context";
 import { useAuth } from "@/lib/auth-context";
@@ -20,6 +24,13 @@ import { useAuth } from "@/lib/auth-context";
 // Well-known carrier codes EasyPost recognizes for tracker/rate matching —
 // not exhaustive, just the common ones staff are likely to actually assign.
 const CARRIER_OPTIONS = ["USPS", "UPS", "FedEx", "DHL"];
+
+const PAYMENT_METHOD_OPTIONS: { value: PaymentMethod; label: string }[] = [
+  { value: "CARD", label: "Card" },
+  { value: "PAYPAL", label: "PayPal" },
+  { value: "BANK", label: "Bank transfer" },
+  { value: "PAY_WITH_CHECK", label: "Check" },
+];
 
 export default function ConfigurationPage() {
   const { user } = useAuth();
@@ -48,6 +59,29 @@ export default function ConfigurationPage() {
       .catch(() => {})
       .finally(() => setRulesLoading(false));
   }, []);
+
+  const [paymentRules, setPaymentRules] = useState<PaymentMethodRule[]>([]);
+  const [paymentRulesLoading, setPaymentRulesLoading] = useState(true);
+  const [paymentRuleCountry, setPaymentRuleCountry] = useState("");
+  const [paymentRuleMethods, setPaymentRuleMethods] = useState<PaymentMethod[]>([]);
+  const [paymentRuleSaving, setPaymentRuleSaving] = useState(false);
+  const [paymentRuleError, setPaymentRuleError] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetchPaymentMethodRules()
+      .then(setPaymentRules)
+      .catch(() => {})
+      .finally(() => setPaymentRulesLoading(false));
+  }, []);
+
+  // Group the flat (country, method) rows into one entry per country for
+  // display — the API stores/edits them flat (see
+  // paymentMethodRule.service.ts), but staff think in terms of "this
+  // country accepts these methods," not individual rows.
+  const paymentRulesByCountry = paymentRules.reduce<Record<string, PaymentMethod[]>>((acc, rule) => {
+    (acc[rule.country] ??= []).push(rule.paymentMethod);
+    return acc;
+  }, {});
 
   const [pendingReset, setPendingReset] = useState<"clear" | "seed" | null>(null);
   const [resetConfirmText, setResetConfirmText] = useState("");
@@ -158,6 +192,46 @@ export default function ConfigurationPage() {
       setCarrierRules((prev) => prev.filter((r) => r.id !== id));
     } catch (err) {
       setRuleError(err instanceof Error ? err.message : "Failed to delete rule.");
+    }
+  }
+
+  function toggleRuleMethod(method: PaymentMethod) {
+    setPaymentRuleMethods((prev) =>
+      prev.includes(method) ? prev.filter((m) => m !== method) : [...prev, method]
+    );
+  }
+
+  async function handleAddPaymentRule() {
+    setPaymentRuleError(null);
+    const country = paymentRuleCountry.trim().toUpperCase();
+    if (country.length !== 2) {
+      setPaymentRuleError("Enter a 2-letter country code (e.g. US, DE).");
+      return;
+    }
+    if (paymentRuleMethods.length === 0) {
+      setPaymentRuleError("Select at least one accepted payment method.");
+      return;
+    }
+    setPaymentRuleSaving(true);
+    try {
+      const updated = await setPaymentMethodRules(country, paymentRuleMethods);
+      setPaymentRules((prev) => [...prev.filter((r) => r.country !== country), ...updated]);
+      setPaymentRuleCountry("");
+      setPaymentRuleMethods([]);
+    } catch (err) {
+      setPaymentRuleError(err instanceof Error ? err.message : "Failed to save rule.");
+    } finally {
+      setPaymentRuleSaving(false);
+    }
+  }
+
+  async function handleRemovePaymentRule(country: string) {
+    setPaymentRuleError(null);
+    try {
+      await setPaymentMethodRules(country, []);
+      setPaymentRules((prev) => prev.filter((r) => r.country !== country));
+    } catch (err) {
+      setPaymentRuleError(err instanceof Error ? err.message : "Failed to remove rule.");
     }
   }
 
@@ -414,6 +488,89 @@ export default function ConfigurationPage() {
           )}
           {ruleError && <p className="mt-3 text-sm text-brand-600">{ruleError}</p>}
         </div>
+      </div>
+
+      <div className="mt-6 max-w-xl rounded-xl border border-ink-100 bg-white p-6">
+        <p className="text-sm font-medium text-ink-900">Accepted payment methods by country</p>
+        <p className="mt-1 text-xs text-ink-400">
+          Restrict which payment methods checkout accepts for a given shipping country (e.g. only Bank/PayPal where
+          card processing isn&apos;t set up). A country with no rule accepts every payment method.
+        </p>
+
+        {paymentRulesLoading ? (
+          <p className="mt-4 text-sm text-ink-500">Loading...</p>
+        ) : Object.keys(paymentRulesByCountry).length === 0 ? (
+          <p className="mt-4 text-sm text-ink-400">No restrictions yet — every country accepts all payment methods.</p>
+        ) : (
+          <table className="mt-4 w-full text-left text-sm">
+            <thead>
+              <tr className="border-b border-ink-100 text-xs uppercase tracking-wide text-ink-500">
+                <th className="py-2 font-medium">Country</th>
+                <th className="py-2 font-medium">Accepted methods</th>
+                {canEdit && <th className="py-2 font-medium"></th>}
+              </tr>
+            </thead>
+            <tbody>
+              {Object.entries(paymentRulesByCountry).map(([country, methods]) => (
+                <tr key={country} className="border-b border-ink-100 last:border-0">
+                  <td className="py-2 font-mono text-ink-900">{country}</td>
+                  <td className="py-2 text-ink-700">
+                    {methods
+                      .map((m) => PAYMENT_METHOD_OPTIONS.find((o) => o.value === m)?.label ?? m)
+                      .join(", ")}
+                  </td>
+                  {canEdit && (
+                    <td className="py-2 text-right">
+                      <button
+                        onClick={() => handleRemovePaymentRule(country)}
+                        className="text-xs font-medium text-brand-600 hover:underline"
+                      >
+                        Remove
+                      </button>
+                    </td>
+                  )}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+
+        {canEdit && (
+          <div className="mt-4 border-t border-ink-100 pt-4">
+            <div className="flex items-end gap-2">
+              <div>
+                <label className="block text-xs font-medium uppercase tracking-wide text-ink-500">Country</label>
+                <input
+                  value={paymentRuleCountry}
+                  onChange={(e) => setPaymentRuleCountry(e.target.value.slice(0, 2))}
+                  placeholder="US"
+                  className="mt-1 w-20 rounded-md border border-ink-100 px-3 py-1.5 text-sm uppercase outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
+                />
+              </div>
+            </div>
+            <div className="mt-3 flex flex-wrap gap-3">
+              {PAYMENT_METHOD_OPTIONS.map((opt) => (
+                <label key={opt.value} className="flex items-center gap-1.5 text-sm text-ink-700">
+                  <input
+                    type="checkbox"
+                    checked={paymentRuleMethods.includes(opt.value)}
+                    onChange={() => toggleRuleMethod(opt.value)}
+                    className="h-4 w-4"
+                  />
+                  {opt.label}
+                </label>
+              ))}
+            </div>
+            <button
+              onClick={handleAddPaymentRule}
+              disabled={paymentRuleSaving}
+              className="mt-3 rounded-md bg-brand-500 px-3 py-1.5 text-sm font-medium text-white hover:bg-brand-600 disabled:opacity-50"
+            >
+              {paymentRuleSaving ? "Saving..." : "Save rule"}
+            </button>
+          </div>
+        )}
+        {paymentRuleError && <p className="mt-3 text-sm text-brand-600">{paymentRuleError}</p>}
       </div>
 
       {canEdit && (
