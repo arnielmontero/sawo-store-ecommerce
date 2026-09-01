@@ -3,7 +3,9 @@ import { OrderStatus } from "@prisma/client";
 import { prisma } from "../lib/prisma";
 import { stripe } from "../lib/stripe";
 import { HttpError } from "../middleware/errorHandler";
-import { updateOrderStatus } from "./order.service";
+import { getOrderById, setOrderStatus, updateOrderStatus } from "./order.service";
+import { restockCommittedStock } from "./inventory.service";
+import { getStoreSettings } from "./settings.service";
 
 // Creates (or reuses, on retry) a Stripe PaymentIntent for an order.
 //
@@ -101,17 +103,120 @@ export async function listPayments() {
   });
 }
 
-export async function refundOrder(orderId: number) {
-  const order = await prisma.order.findUnique({ where: { id: orderId } });
+export interface RefundInput {
+  // Omitted = refund the full remaining balance (totalCents - refundedCents)
+  // — this is the original, pre-partial-refund behavior, still the default
+  // for every existing caller that doesn't pass an amount.
+  amountCents?: number;
+  // Which order items/quantities to restock as a result of THIS refund.
+  // Omitted = restock nothing (e.g. a goodwill partial refund where nothing
+  // is actually being returned) — restocking is never inferred from the
+  // dollar amount, only from an explicit item list, so inventory can't
+  // silently drift from what was physically returned.
+  items?: { orderItemId: number; quantity: number }[];
+}
+
+const REFUNDABLE_STATUSES: OrderStatus[] = [OrderStatus.PAID, OrderStatus.SHIPPED, OrderStatus.PARTIALLY_REFUNDED];
+
+export async function refundOrder(orderId: number, input: RefundInput = {}) {
+  const order = await prisma.order.findUnique({
+    where: { id: orderId },
+    include: { items: true, refunds: { include: { items: true } } },
+  });
   if (!order) throw new HttpError(404, "Order not found");
-  if (order.status !== OrderStatus.PAID) {
+  if (!REFUNDABLE_STATUSES.includes(order.status)) {
     throw new HttpError(409, `Cannot refund an order in status ${order.status}`);
   }
   if (!order.stripePaymentIntentId) {
     throw new HttpError(409, "Order has no associated payment to refund");
   }
 
-  await stripe.refunds.create({ payment_intent: order.stripePaymentIntentId });
+  const remainingCents = order.totalCents - order.refundedCents;
+  const amountCents = input.amountCents ?? remainingCents;
 
-  return updateOrderStatus(orderId, OrderStatus.REFUNDED);
+  if (amountCents <= 0) {
+    throw new HttpError(409, "Order has no remaining balance to refund");
+  }
+  if (amountCents > remainingCents) {
+    throw new HttpError(409, `Cannot refund more than the remaining balance of ${remainingCents} cents`);
+  }
+
+  const isPartial = amountCents < remainingCents;
+  if (isPartial) {
+    const settings = await getStoreSettings();
+    if (!settings.allowPartialRefunds) {
+      throw new HttpError(409, "Partial refunds are disabled — enable them in Configuration to refund a partial amount.");
+    }
+  }
+
+  // Already-restocked quantity per item, across every prior refund on this
+  // order — needed both to cap how much MORE can be restocked now (can't
+  // restock the same physical units twice across multiple partial refunds)
+  // and to compute the "no items specified" default correctly.
+  const alreadyRestockedByItem = new Map<number, number>();
+  for (const refund of order.refunds) {
+    for (const line of refund.items) {
+      alreadyRestockedByItem.set(line.orderItemId, (alreadyRestockedByItem.get(line.orderItemId) ?? 0) + line.quantity);
+    }
+  }
+
+  // Validate the restock list BEFORE calling Stripe — a bad item/quantity
+  // should never leave us having already charged Stripe for a refund we
+  // then fail to record correctly.
+  const itemsById = new Map(order.items.map((item) => [item.id, item]));
+  for (const line of input.items ?? []) {
+    const item = itemsById.get(line.orderItemId);
+    if (!item || item.orderId !== orderId) {
+      throw new HttpError(400, `Order item ${line.orderItemId} does not belong to this order`);
+    }
+    const remainingRestockable = item.quantity - (alreadyRestockedByItem.get(line.orderItemId) ?? 0);
+    if (line.quantity <= 0 || line.quantity > remainingRestockable) {
+      throw new HttpError(
+        400,
+        `Invalid restock quantity for order item ${line.orderItemId} — only ${remainingRestockable} unit(s) remain restockable`
+      );
+    }
+  }
+
+  const stripeRefund = await stripe.refunds.create({
+    payment_intent: order.stripePaymentIntentId,
+    amount: amountCents,
+  });
+
+  // Restocking is entirely driven by the explicit items list. The "no items
+  // specified" default only applies to a plain full refund from a fresh
+  // PAID/SHIPPED state (order.refunds.length === 0) — matching what this
+  // function always did before partial refunds existed. Once any partial
+  // refund has already happened, omitting items means "restock nothing this
+  // time" (e.g. a goodwill top-up refund), never "restock everything again."
+  // This keeps refundOrder as the SOLE place that ever restocks for a
+  // refund; setOrderStatus below is used instead of updateOrderStatus
+  // specifically so its blanket restock-on-REFUNDED branch never runs and
+  // double-counts these units.
+  const restockLines =
+    input.items ?? (order.refunds.length === 0 ? order.items.map((item) => ({ orderItemId: item.id, quantity: item.quantity })) : []);
+  for (const line of restockLines) {
+    const item = itemsById.get(line.orderItemId)!;
+    await restockCommittedStock(item.variantId, line.quantity);
+  }
+
+  const newRefundedCents = order.refundedCents + amountCents;
+  const nextStatus = newRefundedCents >= order.totalCents ? OrderStatus.REFUNDED : OrderStatus.PARTIALLY_REFUNDED;
+
+  await prisma.order.update({
+    where: { id: orderId },
+    data: {
+      refundedCents: newRefundedCents,
+      refunds: {
+        create: {
+          amountCents,
+          stripeRefundId: stripeRefund.id,
+          items: { create: restockLines.map((line) => ({ orderItemId: line.orderItemId, quantity: line.quantity })) },
+        },
+      },
+    },
+  });
+
+  await setOrderStatus(orderId, nextStatus);
+  return getOrderById(orderId);
 }

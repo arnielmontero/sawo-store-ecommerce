@@ -550,17 +550,117 @@ async function seedOrders(customers: { id: number }[], variantsBySku: Map<string
   }
 }
 
+// A richer, hand-built order demonstrating the partial-refunds feature end
+// to end — real RefundRecord/RefundRecordItem rows, a proper multi-stage
+// statusHistory, and a staff note explaining why, so the feature has actual
+// data to show (Held Orders list, order timeline, refund audit trail)
+// without needing a live Stripe key, which isn't available in this
+// environment right now. Kept separate from the flat ORDERS/OrderSeed list
+// above since it needs richer shape (refund + note data) than that table
+// carries.
+async function seedPartialRefundExample(customers: { id: number }[], variantsBySku: Map<string, number>) {
+  const existing = await prisma.order.findFirst({ where: { reference: "SAW-HTR-0095" } });
+  if (existing) return;
+
+  const priceBySku = new Map(
+    PRODUCTS.flatMap((product) => product.variants.map((v) => [v.sku, v.priceCents] as const))
+  );
+
+  const heaterSku = "HTR-NORD-9KW";
+  const stoneSku = "STN-OLIV-44LB";
+  const heaterPriceCents = priceBySku.get(heaterSku)!;
+  const stonePriceCents = priceBySku.get(stoneSku)!;
+  const stoneQuantity = 2;
+  const subtotalCents = heaterPriceCents + stonePriceCents * stoneQuantity;
+
+  const placedAt = new Date(Date.now() - 10 * 24 * 60 * 60 * 1000);
+  const paidAt = new Date(placedAt.getTime() + 20 * 60 * 1000);
+  const refundedAt = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000);
+
+  // One bag of stones arrived cracked — customer keeps the heater and the
+  // other bag, gets refunded for just the damaged unit, and that one unit
+  // is restocked. The order stays PARTIALLY_REFUNDED (not fully resolved)
+  // since the heater itself was never returned.
+  const refundAmountCents = stonePriceCents;
+
+  const order = await prisma.order.create({
+    data: {
+      reference: "SAW-HTR-0095",
+      status: OrderStatus.PARTIALLY_REFUNDED,
+      paymentMethod: PaymentMethod.CARD,
+      isNewClient: false,
+      userId: customers[9].id,
+      subtotalCents,
+      totalCents: subtotalCents,
+      refundedCents: refundAmountCents,
+      stripePaymentIntentId: "pi_seed_013",
+      paymentAttemptCount: 1,
+      shippingAddress: ADDRESSES[3],
+      createdAt: placedAt,
+      items: {
+        create: [
+          { variantId: variantsBySku.get(heaterSku)!, quantity: 1, unitPriceCents: heaterPriceCents },
+          { variantId: variantsBySku.get(stoneSku)!, quantity: stoneQuantity, unitPriceCents: stonePriceCents },
+        ],
+      },
+      statusHistory: {
+        create: [
+          { status: OrderStatus.PENDING, changedAt: placedAt },
+          { status: OrderStatus.PAID, changedAt: paidAt },
+          { status: OrderStatus.PARTIALLY_REFUNDED, changedAt: refundedAt },
+        ],
+      },
+      notes: {
+        create: {
+          body: "Customer reported one bag of Olivine Diabase stones arrived cracked. Refunded the single damaged unit and restocked it after inspection; heater and remaining stone bag were kept, no further action needed.",
+          authorName: "Admin",
+          createdAt: refundedAt,
+        },
+      },
+    },
+    include: { items: true },
+  });
+
+  const stoneItem = order.items.find((item) => item.variantId === variantsBySku.get(stoneSku))!;
+
+  await prisma.refundRecord.create({
+    data: {
+      orderId: order.id,
+      amountCents: refundAmountCents,
+      stripeRefundId: "re_seed_001",
+      createdAt: refundedAt,
+      items: { create: { orderItemId: stoneItem.id, quantity: 1 } },
+    },
+  });
+}
+
+async function seedSettings() {
+  // Partial refunds default to off (see StoreSettings.allowPartialRefunds),
+  // but the seed data now includes a real partially-refunded order — turn
+  // the setting on so what's demonstrated in the data matches what the
+  // admin UI shows as enabled, rather than seeding a feature's example data
+  // while its own toggle claims to be off.
+  await prisma.storeSettings.upsert({
+    where: { id: 1 },
+    update: {},
+    create: { id: 1, allowPartialRefunds: true },
+  });
+}
+
 async function main() {
   await seedAdmins();
+  await seedSettings();
   const customers = await seedCustomers();
   const variantsBySku = await seedCatalog();
   await seedOrders(customers, variantsBySku);
+  await seedPartialRefundExample(customers, variantsBySku);
 
   const productCount = PRODUCTS.length;
   const variantCount = PRODUCTS.reduce((sum, p) => sum + p.variants.length, 0);
   console.log(
     `Seeded admin user (admin / admin123), staff user (staff / staff123), ${customers.length} customers, ` +
-      `${CATEGORIES.length} categories, ${productCount} products (${variantCount} variants), and ${ORDERS.length} orders.`
+      `${CATEGORIES.length} categories, ${productCount} products (${variantCount} variants), ${ORDERS.length + 1} orders ` +
+      `(including one partially-refunded example), and enabled partial refunds in store settings.`
   );
 }
 

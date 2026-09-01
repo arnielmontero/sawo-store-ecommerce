@@ -21,7 +21,7 @@ export function StoreSettingsProvider({ children }: { children: ReactNode }) {
     if (!user) return;
     fetchStoreSettings()
       .then(setSettings)
-      .catch(() => setSettings({ storeName: DEFAULT_STORE_NAME, logoUrl: null }));
+      .catch(() => setSettings({ storeName: DEFAULT_STORE_NAME, logoUrl: null, allowPartialRefunds: false }));
   }, [user]);
 
   return (

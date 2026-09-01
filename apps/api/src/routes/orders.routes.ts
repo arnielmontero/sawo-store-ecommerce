@@ -1,14 +1,18 @@
 import { Router } from "express";
 import { z } from "zod";
 import { OrderStatus, PaymentMethod, AdminRole } from "@prisma/client";
+import { prisma } from "../lib/prisma";
 import { requireAuth, requireRole } from "../middleware/requireAuth";
 import { checkoutRateLimiter } from "../middleware/rateLimit";
 import { HttpError } from "../middleware/errorHandler";
 import {
+  addOrderNote,
   checkout,
+  exportOrdersCsv,
   getOrderById,
   getOrdersForUser,
   getOrderStatistics,
+  listHeldOrders,
   listOrders,
   updateOrderStatus,
 } from "../services/order.service";
@@ -79,11 +83,36 @@ ordersRouter.get("/", async (req, res, next) => {
   }
 });
 
-// Registered before "/:id" so "statistics" never gets parsed as an order id.
+// Registered before "/:id" so "statistics"/"held" never get parsed as an
+// order id.
 ordersRouter.get("/statistics", async (_req, res, next) => {
   try {
     const stats = await getOrderStatistics();
     res.json(stats);
+  } catch (err) {
+    next(err);
+  }
+});
+
+ordersRouter.get("/held", async (_req, res, next) => {
+  try {
+    const orders = await listHeldOrders();
+    res.json({ orders });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Exports the same filtered set the on-screen list would show (minus
+// pagination) — reuses listQuerySchema so search/status/date-range filters
+// behave identically between the list and its export.
+ordersRouter.get("/export", async (req, res, next) => {
+  try {
+    const filters = listQuerySchema.parse(req.query);
+    const csv = await exportOrdersCsv(filters);
+    res.setHeader("Content-Type", "text/csv");
+    res.setHeader("Content-Disposition", `attachment; filename="orders-export.csv"`);
+    res.send(csv);
   } catch (err) {
     next(err);
   }
@@ -95,6 +124,24 @@ ordersRouter.get("/:id", async (req, res, next) => {
     const order = await getOrderById(id);
     if (!order) throw new HttpError(404, "Order not found");
     res.json({ order });
+  } catch (err) {
+    next(err);
+  }
+});
+
+const addNoteSchema = z.object({ body: z.string().min(1).max(2000) });
+
+// Any authenticated backoffice user can leave a note — unlike status
+// transitions, this isn't a role-gated action, just a record of who said
+// what and when.
+ordersRouter.post("/:id/notes", async (req, res, next) => {
+  try {
+    const id = Number(req.params.id);
+    const { body } = addNoteSchema.parse(req.body);
+    const admin = await prisma.adminUser.findUnique({ where: { id: req.adminAuth!.userId } });
+    if (!admin) throw new HttpError(401, "Unauthorized");
+    const order = await addOrderNote(id, body, admin.name);
+    res.status(201).json({ order });
   } catch (err) {
     next(err);
   }

@@ -6,11 +6,15 @@ import type { OrderStatus } from "./api";
 export const NEXT_STATES: Record<OrderStatus, OrderStatus[]> = {
   PENDING: ["PAID", "CANCELLED"],
   PAID: ["SHIPPED", "REFUNDED"],
-  SHIPPED: ["DELIVERED", "RETURNED"],
+  SHIPPED: ["DELIVERED", "RETURNED", "REFUNDED"],
   DELIVERED: [],
   CANCELLED: [],
   REFUNDED: [],
   RETURNED: [],
+  // Only reachable when the store has partial refunds on — the order page
+  // hides this action entirely otherwise, since REFUNDED-from-PARTIALLY
+  // requires opening the refund panel, same as REFUNDED-from-PAID/SHIPPED.
+  PARTIALLY_REFUNDED: ["REFUNDED"],
 };
 
 export const ACTION_LABELS: Record<OrderStatus, string> = {
@@ -21,6 +25,7 @@ export const ACTION_LABELS: Record<OrderStatus, string> = {
   CANCELLED: "Cancel Order",
   REFUNDED: "Refund",
   RETURNED: "Mark Returned",
+  PARTIALLY_REFUNDED: "Refund",
 };
 
 // Past-tense phrasing for a completed event in an order's timeline — distinct
@@ -34,4 +39,5 @@ export const STATUS_HISTORY_LABELS: Record<OrderStatus, string> = {
   CANCELLED: "Order cancelled",
   REFUNDED: "Order refunded",
   RETURNED: "Order returned",
+  PARTIALLY_REFUNDED: "Order partially refunded",
 };

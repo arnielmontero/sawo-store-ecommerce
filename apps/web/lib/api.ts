@@ -15,7 +15,8 @@ export type OrderStatus =
   | "DELIVERED"
   | "CANCELLED"
   | "REFUNDED"
-  | "RETURNED";
+  | "RETURNED"
+  | "PARTIALLY_REFUNDED";
 export type PaymentMethod = "PAY_WITH_CHECK" | "PAYPAL" | "BANK" | "CARD";
 
 export interface Order {
@@ -226,6 +227,15 @@ export interface OrderDetail {
   user: { id: number; email: string } | null;
   items: OrderDetailItem[];
   statusHistory: { id: number; status: OrderStatus; changedAt: string }[];
+  notes: { id: number; body: string; authorName: string; createdAt: string }[];
+  refundedCents: number;
+  refunds: {
+    id: number;
+    amountCents: number;
+    stripeRefundId: string | null;
+    createdAt: string;
+    items: { id: number; orderItemId: number; quantity: number }[];
+  }[];
 }
 
 export interface Payment {
@@ -318,6 +328,25 @@ export interface OrderStatistics {
 
 export async function fetchOrderStatistics(): Promise<OrderStatistics> {
   return apiFetch("/api/orders/statistics");
+}
+
+export interface HeldOrder {
+  id: number;
+  reference: string;
+  user: { id: number; email: string } | null;
+  totalCents: number;
+  refundedCents: number;
+  remainingCents: number;
+  currency: string;
+  items: { id: number; productTitle: string; sku: string; quantity: number }[];
+}
+
+// Orders sitting in PARTIALLY_REFUNDED — money already moved back to the
+// customer for part of the order, but the order itself isn't fully
+// resolved. See order.service.ts's listHeldOrders.
+export async function fetchHeldOrders(): Promise<HeldOrder[]> {
+  const data = await apiFetch("/api/orders/held");
+  return data.orders;
 }
 
 export interface OrdersPage {
@@ -506,6 +535,26 @@ export async function importProductsCsv(file: File): Promise<CsvImportResult> {
   return apiFetch("/api/v1/products/admin/import", { method: "POST", body: formData });
 }
 
+// Exports whatever the Orders list is currently filtered to (search/status/
+// date range) — omit all params for the full unfiltered export.
+export async function exportOrdersCsvUrl(
+  params: { search?: string; status?: OrderStatus; dateFrom?: string; dateTo?: string } = {}
+): Promise<string> {
+  const query = new URLSearchParams();
+  if (params.search) query.set("search", params.search);
+  if (params.status) query.set("status", params.status);
+  if (params.dateFrom) query.set("dateFrom", params.dateFrom);
+  if (params.dateTo) query.set("dateTo", params.dateTo);
+  const qs = query.toString();
+  const res = await fetch(`${API_URL}/api/orders/export${qs ? `?${qs}` : ""}`, {
+    credentials: "include",
+    headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : {},
+  });
+  if (!res.ok) throw new ApiError(res.status, "Failed to export orders");
+  const blob = await res.blob();
+  return URL.createObjectURL(blob);
+}
+
 export async function fetchOrder(id: number): Promise<OrderDetail> {
   const data = await apiFetch(`/api/orders/${id}`);
   return data.order;
@@ -515,6 +564,14 @@ export async function updateOrderStatus(id: number, status: OrderStatus): Promis
   const data = await apiFetch(`/api/orders/${id}/status`, {
     method: "PATCH",
     body: JSON.stringify({ status }),
+  });
+  return data.order;
+}
+
+export async function addOrderNote(id: number, body: string): Promise<OrderDetail> {
+  const data = await apiFetch(`/api/orders/${id}/notes`, {
+    method: "POST",
+    body: JSON.stringify({ body }),
   });
   return data.order;
 }
@@ -546,10 +603,18 @@ export async function fetchPayments(): Promise<Payment[]> {
   return data.payments;
 }
 
-export async function refundPayment(orderId: number): Promise<Order> {
+// The endpoint always returns the full OrderDetail shape (via getOrderById
+// server-side) — typed as such so callers that need the detail fields
+// (RefundPanel) don't need an unsafe cast; callers that only read summary
+// fields like `status` (Payments/Orders list pages) still work fine since
+// OrderDetail is a superset of Order.
+export async function refundPayment(
+  orderId: number,
+  options?: { amountCents?: number; items?: { orderItemId: number; quantity: number }[] }
+): Promise<OrderDetail> {
   const data = await apiFetch("/api/v1/payments/refund", {
     method: "POST",
-    body: JSON.stringify({ orderId }),
+    body: JSON.stringify({ orderId, ...options }),
   });
   return data.order;
 }
@@ -557,6 +622,7 @@ export async function refundPayment(orderId: number): Promise<Order> {
 export interface StoreSettings {
   storeName: string;
   logoUrl: string | null;
+  allowPartialRefunds: boolean;
 }
 
 export async function fetchStoreSettings(): Promise<StoreSettings> {
@@ -568,6 +634,14 @@ export async function updateStoreSettings(storeName: string): Promise<StoreSetti
   const data = await apiFetch("/api/v1/settings", {
     method: "PATCH",
     body: JSON.stringify({ storeName }),
+  });
+  return data.settings;
+}
+
+export async function setAllowPartialRefunds(allowPartialRefunds: boolean): Promise<StoreSettings> {
+  const data = await apiFetch("/api/v1/settings", {
+    method: "PATCH",
+    body: JSON.stringify({ allowPartialRefunds }),
   });
   return data.settings;
 }

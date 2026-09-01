@@ -2,12 +2,14 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { fetchOrders, updateOrderStatus, refundPayment, type Order, type OrderStatus } from "@/lib/api";
+import { fetchOrders, updateOrderStatus, refundPayment, exportOrdersCsvUrl, type Order, type OrderStatus } from "@/lib/api";
 import { formatCents, formatPaymentMethod } from "@/lib/format";
 import { StatusBadge } from "@/components/StatusBadge";
 import { OrderRowMenu } from "@/components/OrderRowMenu";
 import { OrderStatisticsPanel } from "@/components/OrderStatisticsPanel";
+import { HeldOrdersPanel } from "@/components/HeldOrdersPanel";
 import { useAuth } from "@/lib/auth-context";
+import { useStoreSettings } from "@/lib/store-settings-context";
 
 const STATUS_OPTIONS: OrderStatus[] = [
   "PENDING",
@@ -16,20 +18,25 @@ const STATUS_OPTIONS: OrderStatus[] = [
   "DELIVERED",
   "CANCELLED",
   "REFUNDED",
+  "PARTIALLY_REFUNDED",
   "RETURNED",
 ];
 
 export default function OrdersPage() {
   const { user } = useAuth();
+  const { settings } = useStoreSettings();
   const [orders, setOrders] = useState<Order[]>([]);
   const [pagination, setPagination] = useState({ page: 1, pageSize: 20, total: 0, totalPages: 1 });
   const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<OrderStatus | "">("");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
   const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [statsOpen, setStatsOpen] = useState(false);
+  const [heldOpen, setHeldOpen] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
 
   // Debounce the search box so every keystroke doesn't fire a request.
@@ -43,7 +50,13 @@ export default function OrdersPage() {
 
   function load() {
     setLoading(true);
-    fetchOrders({ search: search || undefined, status: statusFilter || undefined, page })
+    fetchOrders({
+      search: search || undefined,
+      status: statusFilter || undefined,
+      dateFrom: dateFrom || undefined,
+      dateTo: dateTo || undefined,
+      page,
+    })
       .then((result) => {
         setOrders(result.orders);
         setPagination(result.pagination);
@@ -52,7 +65,18 @@ export default function OrdersPage() {
       .finally(() => setLoading(false));
   }
 
-  useEffect(load, [search, statusFilter, page]);
+  useEffect(load, [search, statusFilter, dateFrom, dateTo, page]);
+
+  const hasFilters = Boolean(search || statusFilter || dateFrom || dateTo);
+
+  function clearFilters() {
+    setSearchInput("");
+    setSearch("");
+    setStatusFilter("");
+    setDateFrom("");
+    setDateTo("");
+    setPage(1);
+  }
 
   const canAct = user?.role === "ADMIN" || user?.role === "FULFILLMENT_STAFF";
 
@@ -70,16 +94,46 @@ export default function OrdersPage() {
     }
   }
 
+  async function handleExport() {
+    const url = await exportOrdersCsvUrl({
+      search: search || undefined,
+      status: statusFilter || undefined,
+      dateFrom: dateFrom || undefined,
+      dateTo: dateTo || undefined,
+    });
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "orders-export.csv";
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
   return (
     <div>
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-semibold text-ink-900">Orders</h1>
-        <button
-          onClick={() => setStatsOpen(true)}
-          className="rounded-md border border-ink-100 px-4 py-2 text-sm font-medium text-ink-700 hover:bg-gray-50"
-        >
-          Order Statistics
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={handleExport}
+            className="rounded-md border border-ink-100 px-4 py-2 text-sm font-medium text-ink-700 hover:bg-gray-50"
+          >
+            Export CSV
+          </button>
+          {settings?.allowPartialRefunds && (
+            <button
+              onClick={() => setHeldOpen(true)}
+              className="rounded-md border border-ink-100 px-4 py-2 text-sm font-medium text-ink-700 hover:bg-gray-50"
+            >
+              Held Orders
+            </button>
+          )}
+          <button
+            onClick={() => setStatsOpen(true)}
+            className="rounded-md border border-ink-100 px-4 py-2 text-sm font-medium text-ink-700 hover:bg-gray-50"
+          >
+            Order Statistics
+          </button>
+        </div>
       </div>
 
       {actionError && (
@@ -91,30 +145,61 @@ export default function OrdersPage() {
           <p className="text-sm font-medium text-ink-900">
             Orders ({pagination.total})
           </p>
-          <div className="flex items-center gap-2">
-            <select
-              value={statusFilter}
+          <input
+            type="text"
+            value={searchInput}
+            onChange={(e) => setSearchInput(e.target.value)}
+            placeholder="Search by reference or customer email..."
+            className="w-72 rounded-md border border-ink-100 bg-gray-50 px-3 py-1.5 text-sm outline-none focus:border-brand-500 focus:bg-white focus:ring-1 focus:ring-brand-500"
+          />
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2 border-b border-ink-100 px-5 py-3">
+          <select
+            value={statusFilter}
+            onChange={(e) => {
+              setStatusFilter(e.target.value as OrderStatus | "");
+              setPage(1);
+            }}
+            className="rounded-md border border-ink-100 bg-gray-50 px-3 py-1.5 text-sm outline-none focus:border-brand-500 focus:bg-white focus:ring-1 focus:ring-brand-500"
+          >
+            <option value="">All statuses</option>
+            {STATUS_OPTIONS.map((status) => (
+              <option key={status} value={status}>
+                {status}
+              </option>
+            ))}
+          </select>
+          <div className="flex items-center gap-1.5 text-sm text-ink-500">
+            <span>From</span>
+            <input
+              type="date"
+              value={dateFrom}
               onChange={(e) => {
-                setStatusFilter(e.target.value as OrderStatus | "");
+                setDateFrom(e.target.value);
                 setPage(1);
               }}
               className="rounded-md border border-ink-100 bg-gray-50 px-3 py-1.5 text-sm outline-none focus:border-brand-500 focus:bg-white focus:ring-1 focus:ring-brand-500"
-            >
-              <option value="">All statuses</option>
-              {STATUS_OPTIONS.map((status) => (
-                <option key={status} value={status}>
-                  {status}
-                </option>
-              ))}
-            </select>
+            />
+            <span>to</span>
             <input
-              type="text"
-              value={searchInput}
-              onChange={(e) => setSearchInput(e.target.value)}
-              placeholder="Search by reference or customer email..."
-              className="w-72 rounded-md border border-ink-100 bg-gray-50 px-3 py-1.5 text-sm outline-none focus:border-brand-500 focus:bg-white focus:ring-1 focus:ring-brand-500"
+              type="date"
+              value={dateTo}
+              onChange={(e) => {
+                setDateTo(e.target.value);
+                setPage(1);
+              }}
+              className="rounded-md border border-ink-100 bg-gray-50 px-3 py-1.5 text-sm outline-none focus:border-brand-500 focus:bg-white focus:ring-1 focus:ring-brand-500"
             />
           </div>
+          {hasFilters && (
+            <button
+              onClick={clearFilters}
+              className="rounded-md px-3 py-1.5 text-sm font-medium text-ink-500 hover:bg-gray-50 hover:text-ink-900"
+            >
+              Clear filters
+            </button>
+          )}
         </div>
 
         {error ? (
@@ -123,7 +208,7 @@ export default function OrdersPage() {
           <p className="px-5 py-8 text-center text-sm text-ink-500">Loading...</p>
         ) : orders.length === 0 ? (
           <p className="px-5 py-8 text-center text-sm text-ink-500">
-            {search || statusFilter ? "No orders match your search." : "No orders yet."}
+            {hasFilters ? "No orders match your filters." : "No orders yet."}
           </p>
         ) : (
           <div className="overflow-x-auto">
@@ -196,6 +281,7 @@ export default function OrdersPage() {
       </div>
 
       {statsOpen && <OrderStatisticsPanel onClose={() => setStatsOpen(false)} />}
+      {heldOpen && <HeldOrdersPanel onClose={() => setHeldOpen(false)} />}
     </div>
   );
 }

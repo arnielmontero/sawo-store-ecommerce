@@ -23,6 +23,7 @@ settingsRouter.get("/", async (_req, res, next) => {
 const updateSettingsSchema = z.object({
   storeName: z.string().min(1).max(60).optional(),
   logoUrl: z.string().url().nullable().optional(),
+  allowPartialRefunds: z.boolean().optional(),
 });
 
 settingsRouter.patch("/", requireRole(AdminRole.ADMIN), async (req, res, next) => {

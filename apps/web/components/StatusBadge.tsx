@@ -8,6 +8,7 @@ const STYLES: Record<OrderStatus, string> = {
   CANCELLED: "bg-gray-100 text-ink-500",
   REFUNDED: "bg-gray-100 text-ink-500",
   RETURNED: "bg-amber-50 text-amber-700",
+  PARTIALLY_REFUNDED: "bg-amber-50 text-amber-700",
 };
 
 const LABELS: Record<OrderStatus, string> = {
@@ -18,6 +19,7 @@ const LABELS: Record<OrderStatus, string> = {
   CANCELLED: "Cancelled",
   REFUNDED: "Refunded",
   RETURNED: "Returned",
+  PARTIALLY_REFUNDED: "Partially Refunded",
 };
 
 export function StatusBadge({ status }: { status: OrderStatus }) {

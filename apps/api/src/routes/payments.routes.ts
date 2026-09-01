@@ -49,15 +49,27 @@ paymentsRouter.post("/webhook", async (req, res, next) => {
   }
 });
 
-const refundSchema = z.object({ orderId: z.number().int().positive() });
+const refundSchema = z.object({
+  orderId: z.number().int().positive(),
+  // Omitted = refund the full remaining balance (the original behavior).
+  // Providing less than the full remaining balance requires
+  // StoreSettings.allowPartialRefunds to be on — enforced in refundOrder.
+  amountCents: z.number().int().positive().optional(),
+  // Which order items/quantities to restock as a result of this refund.
+  // Omitted = for a full refund, every item's full quantity is restocked
+  // (the original behavior); for a partial refund, nothing is restocked
+  // unless explicitly listed here.
+  items: z
+    .array(z.object({ orderItemId: z.number().int().positive(), quantity: z.number().int().positive() }))
+    .optional(),
+});
 
 // Admin only — matches the diagram ("Admin: Initiates full or partial
-// refunds"). Full refunds only for now; partial-amount refunds would need
-// an amount field and matching partial-inventory-restock logic.
+// refunds").
 paymentsRouter.post("/refund", requireAuth, requireRole(AdminRole.ADMIN), async (req, res, next) => {
   try {
-    const { orderId } = refundSchema.parse(req.body);
-    const order = await refundOrder(orderId);
+    const { orderId, amountCents, items } = refundSchema.parse(req.body);
+    const order = await refundOrder(orderId, { amountCents, items });
     res.json({ order });
   } catch (err) {
     next(err);

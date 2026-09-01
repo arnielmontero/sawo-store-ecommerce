@@ -207,6 +207,11 @@ enum OrderStatus {
   CANCELLED
   REFUNDED
   RETURNED
+  // A refund for less than the full remaining balance was issued — the
+  // order stays "open" (not terminal) so another partial refund, or a
+  // final refund that closes out the remaining balance, can still happen.
+  // Only reachable when StoreSettings.allowPartialRefunds is on.
+  PARTIALLY_REFUNDED
 }
 
 enum PaymentMethod {
@@ -245,6 +250,12 @@ model Order {
   paymentAttemptCount  Int     @default(0)
   stripePaymentIntentId String? @unique
 
+  // Running total refunded so far across every RefundRecord for this order —
+  // caps how much more can still be refunded (totalCents - refundedCents).
+  // Stays 0 for a full refund done the old way (status flips straight to
+  // REFUNDED); only meaningfully tracked once partial refunds are in play.
+  refundedCents Int @default(0)
+
   userId Int?
   user   User? @relation(fields: [userId], references: [id])
 
@@ -254,9 +265,61 @@ model Order {
   updatedAt DateTime @updatedAt
 
   statusHistory OrderStatusHistory[]
+  refunds       RefundRecord[]
+  notes         OrderNote[]
 
   @@index([status])
   @@index([userId])
+}
+
+// One row per refund event (full or partial) — the audit trail for "how
+// much has been refunded, and which specific item quantities were restocked
+// as a result." A full refund (existing flow) also creates exactly one of
+// these, covering the whole order's items, so the history reads the same
+// way regardless of whether partial refunds are enabled.
+model RefundRecord {
+  id             Int      @id @default(autoincrement())
+  order          Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  orderId        Int
+  amountCents    Int
+  stripeRefundId String?
+  createdAt      DateTime @default(now())
+
+  items RefundRecordItem[]
+
+  @@index([orderId])
+}
+
+// Which variant/quantity was restocked as part of a given refund — lets a
+// partial refund restock only the units actually being returned, and keeps
+// a running "already restocked via refund" count per item so the same units
+// can never be double-restocked across multiple partial refunds.
+model RefundRecordItem {
+  id             Int          @id @default(autoincrement())
+  refundRecord   RefundRecord @relation(fields: [refundRecordId], references: [id], onDelete: Cascade)
+  refundRecordId Int
+  orderItem      OrderItem    @relation(fields: [orderItemId], references: [id], onDelete: Cascade)
+  orderItemId    Int
+  quantity       Int
+
+  @@index([refundRecordId])
+  @@index([orderItemId])
+}
+
+// Free-text internal notes staff leave on an order (e.g. "customer called,
+// wants address changed") — never shown to the customer, purely a backoffice
+// record. Author kept as a plain string snapshot of the admin's name rather
+// than a hard FK, so a note stays legible even if that admin account is
+// later removed.
+model OrderNote {
+  id        Int      @id @default(autoincrement())
+  order     Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  orderId   Int
+  body      String   @db.Text
+  authorName String
+  createdAt DateTime @default(now())
+
+  @@index([orderId])
 }
 
 // One row per status transition — Order.updatedAt only ever reflects the
@@ -281,6 +344,8 @@ model OrderItem {
   variantId      Int
   quantity       Int
   unitPriceCents Int
+
+  refundItems RefundRecordItem[]
 
   @@index([orderId])
   @@index([variantId])
@@ -311,5 +376,10 @@ model StoreSettings {
   // Null means "no logo uploaded" — the Sidebar falls back to a plain
   // initial-letter box in that case rather than a broken image.
   logoUrl   String?
+  // Off by default — partial refunds leave an order in an in-between
+  // PARTIALLY_REFUNDED state with specific items/quantities held out of
+  // inventory, which is a real operational mode staff need to opt into
+  // rather than have silently available. See payment.service.ts refundOrder.
+  allowPartialRefunds Boolean @default(false)
   updatedAt DateTime @updatedAt
 }

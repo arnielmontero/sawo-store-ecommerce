@@ -10,10 +10,23 @@ export async function getStoreSettings() {
   });
 }
 
-export async function updateStoreSettings(input: { storeName?: string; logoUrl?: string | null }) {
+export async function updateStoreSettings(input: {
+  storeName?: string;
+  logoUrl?: string | null;
+  allowPartialRefunds?: boolean;
+}) {
   return prisma.storeSettings.upsert({
     where: { id: 1 },
-    update: { storeName: input.storeName, logoUrl: input.logoUrl },
-    create: { id: 1, storeName: input.storeName, logoUrl: input.logoUrl },
+    update: {
+      storeName: input.storeName,
+      logoUrl: input.logoUrl,
+      allowPartialRefunds: input.allowPartialRefunds,
+    },
+    create: {
+      id: 1,
+      storeName: input.storeName,
+      logoUrl: input.logoUrl,
+      allowPartialRefunds: input.allowPartialRefunds,
+    },
   });
 }

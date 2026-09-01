@@ -1,7 +1,12 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { updateStoreSettings as saveStoreSettings, uploadStoreLogo, removeStoreLogo } from "@/lib/api";
+import {
+  updateStoreSettings as saveStoreSettings,
+  uploadStoreLogo,
+  removeStoreLogo,
+  setAllowPartialRefunds,
+} from "@/lib/api";
 import { useStoreSettings } from "@/lib/store-settings-context";
 import { useAuth } from "@/lib/auth-context";
 
@@ -14,6 +19,8 @@ export default function ConfigurationPage() {
   const [saved, setSaved] = useState(false);
   const [logoUploading, setLogoUploading] = useState(false);
   const [logoError, setLogoError] = useState<string | null>(null);
+  const [refundsSaving, setRefundsSaving] = useState(false);
+  const [refundsError, setRefundsError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -65,6 +72,19 @@ export default function ConfigurationPage() {
       setLogoError(err instanceof Error ? err.message : "Failed to remove logo.");
     } finally {
       setLogoUploading(false);
+    }
+  }
+
+  async function handlePartialRefundsToggle(next: boolean) {
+    setRefundsError(null);
+    setRefundsSaving(true);
+    try {
+      const updated = await setAllowPartialRefunds(next);
+      setSettings(updated);
+    } catch (err) {
+      setRefundsError(err instanceof Error ? err.message : "Failed to update refund setting.");
+    } finally {
+      setRefundsSaving(false);
     }
   }
 
@@ -157,6 +177,38 @@ export default function ConfigurationPage() {
         ) : (
           <p className="mt-5 text-xs text-ink-400">Only Admin users can change store settings.</p>
         )}
+      </div>
+
+      <div className="mt-6 max-w-xl rounded-xl border border-ink-100 bg-white p-6">
+        <p className="text-sm font-medium text-ink-900">Orders</p>
+
+        <div className="mt-4 flex items-start justify-between gap-4">
+          <div>
+            <p className="text-sm font-medium text-ink-900">Allow partial refunds</p>
+            <p className="mt-1 text-xs text-ink-400">
+              When on, staff can refund an order for less than its full amount, restocking only the items/quantities
+              actually being returned. The order stays open (Partially Refunded) until fully resolved. When off,
+              refunds are always for the full order amount.
+            </p>
+          </div>
+          <button
+            role="switch"
+            aria-checked={settings?.allowPartialRefunds ?? false}
+            onClick={() => canEdit && handlePartialRefundsToggle(!settings?.allowPartialRefunds)}
+            disabled={!canEdit || refundsSaving}
+            className={`relative mt-0.5 h-6 w-11 shrink-0 rounded-full transition disabled:opacity-50 ${
+              settings?.allowPartialRefunds ? "bg-brand-500" : "bg-gray-200"
+            }`}
+          >
+            <span
+              className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition ${
+                settings?.allowPartialRefunds ? "left-5" : "left-0.5"
+              }`}
+            />
+          </button>
+        </div>
+        {refundsError && <p className="mt-3 text-sm text-brand-600">{refundsError}</p>}
+        {!canEdit && <p className="mt-3 text-xs text-ink-400">Only Admin users can change this setting.</p>}
       </div>
     </div>
   );

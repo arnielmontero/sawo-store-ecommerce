@@ -3,20 +3,27 @@
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
-import { fetchOrder, updateOrderStatus, refundPayment, type OrderDetail, type OrderStatus } from "@/lib/api";
+import { fetchOrder, updateOrderStatus, refundPayment, addOrderNote, type OrderDetail, type OrderStatus } from "@/lib/api";
 import { formatCents, formatPaymentMethod } from "@/lib/format";
 import { StatusBadge } from "@/components/StatusBadge";
 import { useAuth } from "@/lib/auth-context";
+import { useStoreSettings } from "@/lib/store-settings-context";
 import { NEXT_STATES, ACTION_LABELS, STATUS_HISTORY_LABELS } from "@/lib/orderStateMachine";
+import { RefundPanel } from "@/components/RefundPanel";
 
 export default function OrderDetailPage() {
   const params = useParams<{ id: string }>();
   const { user } = useAuth();
+  const { settings } = useStoreSettings();
   const [order, setOrder] = useState<OrderDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
   const [updating, setUpdating] = useState<OrderStatus | null>(null);
+  const [refundPanelOpen, setRefundPanelOpen] = useState(false);
+  const [noteBody, setNoteBody] = useState("");
+  const [noteError, setNoteError] = useState<string | null>(null);
+  const [noteSaving, setNoteSaving] = useState(false);
 
   function load() {
     fetchOrder(Number(params.id))
@@ -28,25 +35,40 @@ export default function OrderDetailPage() {
   useEffect(load, [params.id]);
 
   async function handleTransition(status: OrderStatus) {
+    if (status === "REFUNDED") {
+      // Opens the refund panel instead of firing immediately — refunding
+      // needs to go through the payments endpoint (which actually calls
+      // Stripe), and when partial refunds are enabled the admin may want to
+      // specify an amount/items rather than always refunding in full.
+      setActionError(null);
+      setRefundPanelOpen(true);
+      return;
+    }
     setActionError(null);
     setUpdating(status);
     try {
-      if (status === "REFUNDED") {
-        // Goes through the payments endpoint, which actually calls Stripe to
-        // move money back to the customer before flipping the order's
-        // status — the generic status PATCH only flips the status. Refetch
-        // for the full OrderDetail shape rather than trust the narrower
-        // Order shape refundPayment resolves to.
-        await refundPayment(Number(params.id));
-        load();
-      } else {
-        const updated = await updateOrderStatus(Number(params.id), status);
-        setOrder(updated);
-      }
+      const updated = await updateOrderStatus(Number(params.id), status);
+      setOrder(updated);
     } catch (err) {
       setActionError(err instanceof Error ? err.message : "Failed to update order status.");
     } finally {
       setUpdating(null);
+    }
+  }
+
+  async function handleAddNote() {
+    const trimmed = noteBody.trim();
+    if (!trimmed) return;
+    setNoteError(null);
+    setNoteSaving(true);
+    try {
+      const updated = await addOrderNote(Number(params.id), trimmed);
+      setOrder(updated);
+      setNoteBody("");
+    } catch (err) {
+      setNoteError(err instanceof Error ? err.message : "Failed to add note.");
+    } finally {
+      setNoteSaving(false);
     }
   }
 
@@ -89,6 +111,18 @@ export default function OrderDetailPage() {
 
       {actionError && (
         <p className="mt-4 rounded-md bg-brand-50 px-4 py-2 text-sm text-brand-600">{actionError}</p>
+      )}
+
+      {refundPanelOpen && (
+        <RefundPanel
+          order={order}
+          allowPartialRefunds={settings?.allowPartialRefunds ?? false}
+          onClose={() => setRefundPanelOpen(false)}
+          onRefunded={(updated) => {
+            setOrder(updated);
+            setRefundPanelOpen(false);
+          }}
+        />
       )}
 
       <div className="mt-6 grid grid-cols-4 gap-4">
@@ -230,6 +264,49 @@ export default function OrderDetailPage() {
           <p className="mt-1 whitespace-pre-line text-sm text-ink-900">{order.shippingAddress}</p>
         </div>
       )}
+
+      <div className="mt-6 rounded-xl border border-ink-100 bg-white">
+        <div className="border-b border-ink-100 px-5 py-4">
+          <p className="text-sm font-medium text-ink-900">Notes</p>
+          <p className="mt-0.5 text-xs text-ink-400">Internal only — never shown to the customer.</p>
+        </div>
+        <div className="px-5 py-4">
+          <textarea
+            value={noteBody}
+            onChange={(e) => setNoteBody(e.target.value.slice(0, 2000))}
+            placeholder="Leave a note for other staff (e.g. customer called, wants address changed)..."
+            rows={2}
+            className="w-full rounded-md border border-ink-100 px-3 py-2 text-sm outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
+          />
+          <div className="mt-2 flex items-center justify-between">
+            {noteError ? <p className="text-sm text-brand-600">{noteError}</p> : <span />}
+            <button
+              onClick={handleAddNote}
+              disabled={noteSaving || !noteBody.trim()}
+              className="rounded-md bg-brand-500 px-4 py-1.5 text-sm font-medium text-white hover:bg-brand-600 disabled:opacity-50"
+            >
+              {noteSaving ? "Adding..." : "Add note"}
+            </button>
+          </div>
+
+          {order.notes.length > 0 && (
+            <ul className="mt-4 space-y-3 border-t border-ink-100 pt-4">
+              {order.notes.map((note) => (
+                <li key={note.id} className="text-sm">
+                  <p className="whitespace-pre-line text-ink-900">{note.body}</p>
+                  <p className="mt-1 text-xs text-ink-500">
+                    {note.authorName} ·{" "}
+                    {new Date(note.createdAt).toLocaleString(undefined, {
+                      dateStyle: "medium",
+                      timeStyle: "short",
+                    })}
+                  </p>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
