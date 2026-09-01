@@ -2025,6 +2025,34 @@ async function seedCarrierRules() {
   }
 }
 
+// Demo country -> accepted payment method rules, showing the restriction
+// actually doing something (see paymentMethodRule.service.ts's
+// isPaymentMethodAllowed, enforced in order.service.ts's checkout). Doesn't
+// touch every INTL_ADDRESSES country — CA/AU are left unrestricted
+// (accept everything) so the seed also demonstrates the "no rule" default,
+// not just the restricted case. Seed orders themselves are created directly
+// via prisma.order.create (not checkout()), so these rules can never
+// conflict with orders that already exist in the seed data.
+const PAYMENT_METHOD_RULE_MAP: Record<string, PaymentMethod[]> = {
+  // EU: card processing isn't set up for this demo store — bank transfer
+  // and PayPal only, matching a common real-world SMB constraint.
+  DE: [PaymentMethod.BANK, PaymentMethod.PAYPAL],
+  FR: [PaymentMethod.BANK, PaymentMethod.PAYPAL],
+  // US: every method accepted, including check (the store's home market).
+  US: [PaymentMethod.CARD, PaymentMethod.PAYPAL, PaymentMethod.BANK, PaymentMethod.PAY_WITH_CHECK],
+};
+
+async function seedPaymentMethodRules() {
+  const existingCount = await prisma.paymentMethodRule.count();
+  if (existingCount > 0) return;
+
+  for (const [country, methods] of Object.entries(PAYMENT_METHOD_RULE_MAP)) {
+    for (const paymentMethod of methods) {
+      await prisma.paymentMethodRule.create({ data: { country, paymentMethod } });
+    }
+  }
+}
+
 // Mirrors carrier.service.ts's assignCarrier without the async settings
 // lookup — bulk seed generation needs this synchronously for hundreds of
 // rows, and the fallback here matches StoreSettings.defaultCarrier's own
@@ -2209,6 +2237,7 @@ export async function runSeed(): Promise<string> {
   await seedAdmins();
   await seedSettings();
   await seedCarrierRules();
+  await seedPaymentMethodRules();
   const customers = await seedCustomers();
   const bulkCustomers = await seedBulkCustomers();
   await seedCustomerProfileDetails(customers);
@@ -2242,7 +2271,8 @@ export async function runSeed(): Promise<string> {
     `${totalCustomers} customers with full profile detail (name/phone/address — ${CUSTOMER_COUNT} hand-picked, ` +
     `${bulkCustomers.length} algorithmically generated), demo card metadata backfilled onto every card-paid ` +
     `completed order, 20 cart-interest leads spread across curated and bulk customers (most holding ` +
-    `multiple products), ` +
+    `multiple products), ${Object.keys(CARRIER_RULE_MAP).length} country-carrier rules and ` +
+    `${Object.keys(PAYMENT_METHOD_RULE_MAP).length} country-payment-method rules, ` +
     `and enabled partial refunds in store settings.`
   );
 }
