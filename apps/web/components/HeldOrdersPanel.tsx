@@ -51,9 +51,12 @@ export function HeldOrdersPanel({ onClose }: { onClose: () => void }) {
                   <div className="flex items-center justify-between">
                     <Link
                       href={`/orders/${order.id}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      title="Opens in a new tab"
                       className="text-sm font-semibold text-ink-900 hover:text-brand-600 hover:underline"
                     >
-                      {order.reference}
+                      {order.reference} <span className="text-ink-400">↗</span>
                     </Link>
                     <span className="text-xs text-ink-500">
                       {order.user?.email ?? "Guest"}

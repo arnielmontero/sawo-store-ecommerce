@@ -85,9 +85,12 @@ export function StockHistoryPanel({ variant, onClose }: { variant: InventoryRow;
                       {adj.orderId ? (
                         <Link
                           href={`/orders/${adj.orderId}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          title="Opens in a new tab"
                           className="font-mono text-brand-600 hover:underline"
                         >
-                          {adj.orderReference}
+                          {adj.orderReference} <span className="font-sans text-ink-400">↗</span>
                         </Link>
                       ) : (
                         <span className="font-mono">{adj.orderReference}</span>
