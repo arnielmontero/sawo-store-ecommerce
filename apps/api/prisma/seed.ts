@@ -25,6 +25,11 @@ async function seedAdmins() {
 }
 
 const CUSTOMER_COUNT = 12;
+// Extra customers beyond the CUSTOMER_COUNT named ones above, used only by
+// the bulk order batch below — kept as a separate range (starting after the
+// named customers) so none of the hand-crafted orders' hardcoded
+// customers[N] indexes shift.
+const BULK_CUSTOMER_COUNT = 168;
 
 async function seedCustomers() {
   const customerPasswordHash = await hashPassword("customer123");
@@ -39,12 +44,30 @@ async function seedCustomers() {
   );
 }
 
+async function seedBulkCustomers() {
+  const customerPasswordHash = await hashPassword("customer123");
+  return Promise.all(
+    Array.from({ length: BULK_CUSTOMER_COUNT }, (_, i) => {
+      const n = CUSTOMER_COUNT + i + 1;
+      return prisma.user.upsert({
+        where: { email: `customer${n}@example.com` },
+        update: {},
+        create: { email: `customer${n}@example.com`, passwordHash: customerPasswordHash },
+      });
+    })
+  );
+}
+
 interface VariantSeed {
   sku: string;
   priceCents: number;
   attributes: Record<string, string>;
   stockQuantity: number;
 }
+
+// Multiplies every VariantSeed.stockQuantity below at seed time — see the
+// comment where it's applied in seedCatalog for why.
+const STOCK_MULTIPLIER = 6;
 
 interface ProductSeed {
   title: string;
@@ -277,6 +300,12 @@ async function seedCatalog() {
     }
 
     for (const variantSeed of productSeed.variants) {
+      // Base figures above read as a believable "starting" stock count for a
+      // specialty retailer; multiplied up here because the bulk order batch
+      // (see seedBulkOrders) simulates a full year of real sales against
+      // this same stock, and the base figures alone would draw everything
+      // down to nearly zero.
+      const startingStock = variantSeed.stockQuantity * STOCK_MULTIPLIER;
       const variant = await prisma.productVariant.upsert({
         where: { sku: variantSeed.sku },
         update: {},
@@ -285,7 +314,7 @@ async function seedCatalog() {
           priceCents: variantSeed.priceCents,
           attributes: variantSeed.attributes,
           productId: product.id,
-          inventory: { create: { stockQuantity: variantSeed.stockQuantity } },
+          inventory: { create: { stockQuantity: startingStock } },
         },
       });
       variantsBySku.set(variantSeed.sku, variant.id);
@@ -866,6 +895,231 @@ async function seedNotesOnExistingOrders() {
   }
 }
 
+// Small deterministic PRNG (mulberry32) so re-running the seed script always
+// generates the exact same "random" bulk batch — required for idempotency,
+// since a real Math.random() run would create a different dataset (and a
+// different total order count) every time.
+function mulberry32(seed: number) {
+  let a = seed;
+  return function () {
+    a |= 0;
+    a = (a + 0x6d2b79f5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+const BULK_ORDER_COUNT = 800;
+const BULK_REFERENCE_PREFIX = "SAW-BULK-";
+
+// Rough approximation of how a real store's orders settle over time: most
+// orders placed more than ~2 weeks ago have long since finished their
+// lifecycle (delivered, or cancelled/returned/refunded early), while very
+// recent orders are still mid-flight (pending/paid/shipped). Each entry is
+// [status, relativeWeight].
+const STATUS_WEIGHTS_OLD: [OrderStatus, number][] = [
+  [OrderStatus.DELIVERED, 72],
+  [OrderStatus.REFUNDED, 6],
+  [OrderStatus.RETURNED, 5],
+  [OrderStatus.CANCELLED, 5],
+  [OrderStatus.SHIPPED, 2],
+];
+const STATUS_WEIGHTS_RECENT: [OrderStatus, number][] = [
+  [OrderStatus.PENDING, 15],
+  [OrderStatus.PAID, 30],
+  [OrderStatus.SHIPPED, 30],
+  [OrderStatus.DELIVERED, 15],
+  [OrderStatus.CANCELLED, 10],
+];
+
+function weightedPick<T>(rand: () => number, weighted: [T, number][]): T {
+  const total = weighted.reduce((sum, [, w]) => sum + w, 0);
+  let roll = rand() * total;
+  for (const [value, weight] of weighted) {
+    roll -= weight;
+    if (roll <= 0) return value;
+  }
+  return weighted[weighted.length - 1][0];
+}
+
+const PAYMENT_METHODS: PaymentMethod[] = [
+  PaymentMethod.CARD,
+  PaymentMethod.PAYPAL,
+  PaymentMethod.BANK,
+  PaymentMethod.PAY_WITH_CHECK,
+];
+
+// A believable multi-stage timeline for a given final status, with each
+// stage's timestamp interpolated between order placement and "now" (or the
+// final status's own changedAt for terminal-but-not-fully-elapsed orders).
+function buildStatusHistory(finalStatus: OrderStatus, placedAt: Date, resolvedAt: Date) {
+  const span = resolvedAt.getTime() - placedAt.getTime();
+  const at = (fraction: number) => new Date(placedAt.getTime() + span * fraction);
+
+  switch (finalStatus) {
+    case OrderStatus.PENDING:
+      return [{ status: OrderStatus.PENDING, changedAt: placedAt }];
+    case OrderStatus.CANCELLED:
+      return [
+        { status: OrderStatus.PENDING, changedAt: placedAt },
+        { status: OrderStatus.CANCELLED, changedAt: resolvedAt },
+      ];
+    case OrderStatus.PAID:
+      return [
+        { status: OrderStatus.PENDING, changedAt: placedAt },
+        { status: OrderStatus.PAID, changedAt: resolvedAt },
+      ];
+    case OrderStatus.SHIPPED:
+      return [
+        { status: OrderStatus.PENDING, changedAt: placedAt },
+        { status: OrderStatus.PAID, changedAt: at(0.3) },
+        { status: OrderStatus.SHIPPED, changedAt: resolvedAt },
+      ];
+    case OrderStatus.DELIVERED:
+      return [
+        { status: OrderStatus.PENDING, changedAt: placedAt },
+        { status: OrderStatus.PAID, changedAt: at(0.2) },
+        { status: OrderStatus.SHIPPED, changedAt: at(0.55) },
+        { status: OrderStatus.DELIVERED, changedAt: resolvedAt },
+      ];
+    case OrderStatus.RETURNED:
+      return [
+        { status: OrderStatus.PENDING, changedAt: placedAt },
+        { status: OrderStatus.PAID, changedAt: at(0.15) },
+        { status: OrderStatus.SHIPPED, changedAt: at(0.35) },
+        { status: OrderStatus.DELIVERED, changedAt: at(0.6) },
+        { status: OrderStatus.RETURNED, changedAt: resolvedAt },
+      ];
+    case OrderStatus.REFUNDED:
+      return [
+        { status: OrderStatus.PENDING, changedAt: placedAt },
+        { status: OrderStatus.PAID, changedAt: at(0.15) },
+        { status: OrderStatus.SHIPPED, changedAt: at(0.4) },
+        { status: OrderStatus.REFUNDED, changedAt: resolvedAt },
+      ];
+    default:
+      return [{ status: finalStatus, changedAt: resolvedAt }];
+  }
+}
+
+// A large randomized (but deterministically-seeded) batch of ordinary
+// orders spread across the past 12 months, so the admin panel looks like a
+// real, active store rather than a dozen curated demo orders — enough
+// volume for pagination, the statistics panel's trend, and CSV export to
+// mean something. Complements (does not replace) the hand-crafted ORDERS
+// list and the narrative refund examples above.
+async function seedBulkOrders(customers: { id: number }[], variantsBySku: Map<string, number>) {
+  const already = await prisma.order.findFirst({ where: { reference: { startsWith: BULK_REFERENCE_PREFIX } } });
+  if (already) return;
+
+  const rand = mulberry32(20260901);
+  const priceBySku = new Map(
+    PRODUCTS.flatMap((product) => product.variants.map((v) => [v.sku, v.priceCents] as const))
+  );
+  const allSkus = PRODUCTS.flatMap((product) => product.variants.map((v) => v.sku));
+  const now = Date.now();
+  const oneDayMs = 24 * 60 * 60 * 1000;
+
+  // Track cumulative units sold per SKU across the whole batch so stock can
+  // be drawn down realistically at the end instead of per-order writes
+  // (hundreds of extra UPDATE statements) or going negative.
+  const soldBySku = new Map<string, number>();
+
+  for (let i = 0; i < BULK_ORDER_COUNT; i++) {
+    const daysAgo = Math.floor(rand() * 365);
+    const placedAt = new Date(now - daysAgo * oneDayMs - Math.floor(rand() * oneDayMs));
+    const isRecent = daysAgo < 14;
+    const finalStatus = weightedPick(rand, isRecent ? STATUS_WEIGHTS_RECENT : STATUS_WEIGHTS_OLD);
+
+    // Terminal orders resolve some time after placement (capped at "now");
+    // still-open ones (PENDING) resolve "now" by definition.
+    const resolveLagDays = Math.min(daysAgo, 1 + Math.floor(rand() * 10));
+    const resolvedAt =
+      finalStatus === OrderStatus.PENDING
+        ? placedAt
+        : new Date(Math.min(now, placedAt.getTime() + resolveLagDays * oneDayMs));
+
+    const lineCount = 1 + Math.floor(rand() * 3);
+    const skusInOrder = new Set<string>();
+    while (skusInOrder.size < lineCount) {
+      skusInOrder.add(allSkus[Math.floor(rand() * allSkus.length)]);
+    }
+
+    const lines = Array.from(skusInOrder).map((sku) => ({
+      sku,
+      quantity: 1 + Math.floor(rand() * 3),
+    }));
+
+    const items = lines.map((line) => {
+      const unitPriceCents = priceBySku.get(line.sku)!;
+      const variantId = variantsBySku.get(line.sku)!;
+      return { variantId, quantity: line.quantity, unitPriceCents };
+    });
+    const subtotalCents = items.reduce((sum, item) => sum + item.unitPriceCents * item.quantity, 0);
+    const shippingCents = subtotalCents >= 30000 ? 0 : 1500;
+    const taxCents = Math.round(subtotalCents * 0.07);
+    const totalCents = subtotalCents + shippingCents + taxCents;
+
+    const customer = customers[Math.floor(rand() * customers.length)];
+    const paymentMethod = weightedPick(
+      rand,
+      PAYMENT_METHODS.map((m) => [m, 1] as [PaymentMethod, number])
+    );
+    const hasPaymentIntent = finalStatus !== OrderStatus.PENDING && finalStatus !== OrderStatus.CANCELLED;
+    const reference = `${BULK_REFERENCE_PREFIX}${String(i + 1).padStart(6, "0")}`;
+
+    await prisma.order.create({
+      data: {
+        reference,
+        status: finalStatus,
+        paymentMethod,
+        isNewClient: rand() < 0.25,
+        userId: customer.id,
+        subtotalCents,
+        shippingCents,
+        taxCents,
+        totalCents,
+        stripePaymentIntentId: hasPaymentIntent ? `pi_bulk_${String(i + 1).padStart(6, "0")}` : undefined,
+        paymentAttemptCount: hasPaymentIntent ? 1 : 0,
+        shippingAddress: ADDRESSES[Math.floor(rand() * ADDRESSES.length)],
+        trackingNumber:
+          finalStatus === OrderStatus.SHIPPED ||
+          finalStatus === OrderStatus.DELIVERED ||
+          finalStatus === OrderStatus.RETURNED
+            ? `1Z999BLK${String(100000000 + i)}`
+            : undefined,
+        createdAt: placedAt,
+        items: { create: items },
+        statusHistory: { create: buildStatusHistory(finalStatus, placedAt, resolvedAt) },
+      },
+    });
+
+    // Stock only actually leaves the shelf once payment succeeds — a
+    // PENDING or CANCELLED order never drew down inventory in the first
+    // place (mirrors checkout()'s real reserve/release behavior).
+    if (hasPaymentIntent) {
+      for (const line of lines) {
+        soldBySku.set(line.sku, (soldBySku.get(line.sku) ?? 0) + line.quantity);
+      }
+    }
+  }
+
+  // Apply the drawdown after generating all orders, floored so no variant's
+  // displayed stock goes to zero or negative from a year of simulated sales
+  // — a real store restocks; we're not modeling restocking events here, so
+  // this floor just keeps Inventory looking plausible rather than empty.
+  for (const [sku, soldQuantity] of soldBySku) {
+    const variantId = variantsBySku.get(sku);
+    if (!variantId) continue;
+    const inventory = await prisma.inventory.findUnique({ where: { variantId } });
+    if (!inventory) continue;
+    const floor = Math.max(3, Math.floor(inventory.stockQuantity * 0.15));
+    const nextQuantity = Math.max(floor, inventory.stockQuantity - soldQuantity);
+    await prisma.inventory.update({ where: { variantId }, data: { stockQuantity: nextQuantity } });
+  }
+}
+
 async function seedSettings() {
   // Partial refunds default to off (see StoreSettings.allowPartialRefunds),
   // but the seed data now includes a real partially-refunded order — turn
@@ -883,19 +1137,23 @@ async function main() {
   await seedAdmins();
   await seedSettings();
   const customers = await seedCustomers();
+  const bulkCustomers = await seedBulkCustomers();
   const variantsBySku = await seedCatalog();
   await seedOrders(customers, variantsBySku);
   await seedPartialRefundExample(customers, variantsBySku);
   await seedMoreOrderExamples(customers, variantsBySku);
   await seedNotesOnExistingOrders();
+  await seedBulkOrders([...customers, ...bulkCustomers], variantsBySku);
 
   const productCount = PRODUCTS.length;
   const variantCount = PRODUCTS.reduce((sum, p) => sum + p.variants.length, 0);
+  const totalCustomers = customers.length + bulkCustomers.length;
+  const totalOrders = ORDERS.length + 3 + BULK_ORDER_COUNT;
   console.log(
-    `Seeded admin user (admin / admin123), staff user (staff / staff123), ${customers.length} customers, ` +
-      `${CATEGORIES.length} categories, ${productCount} products (${variantCount} variants), ${ORDERS.length + 3} orders ` +
-      `(including 3 refund examples — one held with a single partial refund, one held with two sequential partial ` +
-      `refunds, and one fully resolved via two partial refunds), 4 order notes, and enabled partial refunds in store settings.`
+    `Seeded admin user (admin / admin123), staff user (staff / staff123), ${totalCustomers} customers, ` +
+      `${CATEGORIES.length} categories, ${productCount} products (${variantCount} variants), ${totalOrders} orders total ` +
+      `(${BULK_ORDER_COUNT} bulk-generated over the past 12 months, plus 3 hand-crafted refund examples and ` +
+      `${ORDERS.length} curated demo orders), 4 order notes, and enabled partial refunds in store settings.`
   );
 }
 
