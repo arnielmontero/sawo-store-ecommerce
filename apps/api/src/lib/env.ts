@@ -11,8 +11,14 @@ const envSchema = z.object({
   DATABASE_URL: z.string().min(1, "DATABASE_URL is required"),
   JWT_ACCESS_SECRET: z.string().min(16, "JWT_ACCESS_SECRET must be at least 16 characters"),
   REFRESH_TOKEN_SECRET: z.string().min(16, "REFRESH_TOKEN_SECRET must be at least 16 characters"),
-  STRIPE_SECRET_KEY: z.string().min(1, "STRIPE_SECRET_KEY is required"),
-  STRIPE_WEBHOOK_SECRET: z.string().min(1, "STRIPE_WEBHOOK_SECRET is required"),
+  // Optional here: these three can also be set (or overridden) from the
+  // Configuration page, stored on StoreSettings — see lib/credentials.ts,
+  // which resolves DB-first with these as the fallback. Stripe usage
+  // (createPaymentIntent, etc.) still throws a clear error at call time if
+  // neither source has a value, rather than crashing the whole server at
+  // startup over a key an admin might configure through the UI instead.
+  STRIPE_SECRET_KEY: z.string().optional(),
+  STRIPE_WEBHOOK_SECRET: z.string().optional(),
   // EasyPost (test mode) — carrier tracking, see lib/easypost.ts. Optional:
   // unset in dev leaves tracking creation a no-op (see shipping.service.ts)
   // rather than crashing the whole server over a nice-to-have integration.

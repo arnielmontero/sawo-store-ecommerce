@@ -7,6 +7,7 @@ import {
   removeStoreLogo,
   setAllowPartialRefunds,
   setDefaultCarrier,
+  setSandboxCredentials,
   fetchCarrierRules,
   upsertCarrierRule,
   deleteCarrierRule,
@@ -44,6 +45,13 @@ export default function ConfigurationPage() {
   const [refundsSaving, setRefundsSaving] = useState(false);
   const [refundsError, setRefundsError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const [stripeSecretKeyInput, setStripeSecretKeyInput] = useState("");
+  const [stripeWebhookSecretInput, setStripeWebhookSecretInput] = useState("");
+  const [easypostApiKeyInput, setEasypostApiKeyInput] = useState("");
+  const [credentialsSaving, setCredentialsSaving] = useState(false);
+  const [credentialsError, setCredentialsError] = useState<string | null>(null);
+  const [credentialsSaved, setCredentialsSaved] = useState(false);
 
   const [carrierRules, setCarrierRules] = useState<CarrierRule[]>([]);
   const [rulesLoading, setRulesLoading] = useState(true);
@@ -151,6 +159,32 @@ export default function ConfigurationPage() {
       setRefundsError(err instanceof Error ? err.message : "Failed to update refund setting.");
     } finally {
       setRefundsSaving(false);
+    }
+  }
+
+  async function handleSaveCredentials() {
+    setCredentialsError(null);
+    setCredentialsSaved(false);
+    const input: { stripeSecretKey?: string; stripeWebhookSecret?: string; easypostApiKey?: string } = {};
+    if (stripeSecretKeyInput.trim()) input.stripeSecretKey = stripeSecretKeyInput.trim();
+    if (stripeWebhookSecretInput.trim()) input.stripeWebhookSecret = stripeWebhookSecretInput.trim();
+    if (easypostApiKeyInput.trim()) input.easypostApiKey = easypostApiKeyInput.trim();
+    if (Object.keys(input).length === 0) {
+      setCredentialsError("Enter at least one key to save.");
+      return;
+    }
+    setCredentialsSaving(true);
+    try {
+      const updated = await setSandboxCredentials(input);
+      setSettings(updated);
+      setStripeSecretKeyInput("");
+      setStripeWebhookSecretInput("");
+      setEasypostApiKeyInput("");
+      setCredentialsSaved(true);
+    } catch (err) {
+      setCredentialsError(err instanceof Error ? err.message : "Failed to save credentials.");
+    } finally {
+      setCredentialsSaving(false);
     }
   }
 
@@ -385,6 +419,77 @@ export default function ConfigurationPage() {
         </div>
         {refundsError && <p className="mt-3 text-sm text-brand-600">{refundsError}</p>}
         {!canEdit && <p className="mt-3 text-xs text-ink-400">Only Admin users can change this setting.</p>}
+      </div>
+
+      <div className="mt-6 max-w-xl rounded-xl border border-ink-100 bg-white p-6">
+        <p className="text-sm font-medium text-ink-900">Sandbox API credentials</p>
+        <p className="mt-1 text-xs text-ink-400">
+          Test-mode keys for external integrations. Saved here they take priority over the server&apos;s .env file
+          and apply immediately, no restart needed. Once set, a key is never shown again — only whether one is
+          configured.
+        </p>
+
+        {canEdit ? (
+          <div className="mt-4 space-y-4">
+            <div>
+              <label className="block text-xs font-medium uppercase tracking-wide text-ink-500">
+                Stripe secret key {settings?.stripeSecretKeySet && <span className="text-emerald-600">(configured)</span>}
+              </label>
+              <input
+                type="password"
+                value={stripeSecretKeyInput}
+                onChange={(e) => setStripeSecretKeyInput(e.target.value)}
+                placeholder={settings?.stripeSecretKeySet ? "•••••••••••••••• (leave blank to keep)" : "sk_test_..."}
+                className="mt-1 w-full rounded-md border border-ink-100 px-3 py-2 text-sm font-mono outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium uppercase tracking-wide text-ink-500">
+                Stripe webhook secret{" "}
+                {settings?.stripeWebhookSecretSet && <span className="text-emerald-600">(configured)</span>}
+              </label>
+              <input
+                type="password"
+                value={stripeWebhookSecretInput}
+                onChange={(e) => setStripeWebhookSecretInput(e.target.value)}
+                placeholder={settings?.stripeWebhookSecretSet ? "•••••••••••••••• (leave blank to keep)" : "whsec_..."}
+                className="mt-1 w-full rounded-md border border-ink-100 px-3 py-2 text-sm font-mono outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium uppercase tracking-wide text-ink-500">
+                EasyPost API key {settings?.easypostApiKeySet && <span className="text-emerald-600">(configured)</span>}
+              </label>
+              <p className="mt-1 text-xs text-ink-400">
+                Powers live shipment tracking on Deliveries. Free test key from{" "}
+                <a href="https://www.easypost.com/" target="_blank" rel="noreferrer" className="text-brand-600 hover:underline">
+                  easypost.com
+                </a>{" "}
+                — dashboard → API Keys → Test API Key.
+              </p>
+              <input
+                type="password"
+                value={easypostApiKeyInput}
+                onChange={(e) => setEasypostApiKeyInput(e.target.value)}
+                placeholder={settings?.easypostApiKeySet ? "•••••••••••••••• (leave blank to keep)" : "EZTK..."}
+                className="mt-1 w-full rounded-md border border-ink-100 px-3 py-2 text-sm font-mono outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
+              />
+            </div>
+
+            {credentialsError && <p className="text-sm text-brand-600">{credentialsError}</p>}
+            {credentialsSaved && !credentialsError && <p className="text-sm text-emerald-600">Saved.</p>}
+
+            <button
+              onClick={handleSaveCredentials}
+              disabled={credentialsSaving}
+              className="rounded-md bg-brand-500 px-4 py-2 text-sm font-medium text-white hover:bg-brand-600 disabled:opacity-50"
+            >
+              {credentialsSaving ? "Saving..." : "Save credentials"}
+            </button>
+          </div>
+        ) : (
+          <p className="mt-4 text-xs text-ink-400">Only Admin users can change sandbox credentials.</p>
+        )}
       </div>
 
       <div className="mt-6 max-w-xl rounded-xl border border-ink-100 bg-white p-6">

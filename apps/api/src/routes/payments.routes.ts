@@ -3,7 +3,7 @@ import { z } from "zod";
 import { AdminRole } from "@prisma/client";
 import { requireAuth, requireRole } from "../middleware/requireAuth";
 import { HttpError } from "../middleware/errorHandler";
-import { env } from "../lib/env";
+import { getStripeWebhookSecret } from "../lib/credentials";
 import { createPaymentIntent, handleStripeWebhook, listPayments, refundOrder } from "../services/payment.service";
 
 export const paymentsRouter = Router();
@@ -42,7 +42,10 @@ paymentsRouter.post("/webhook", async (req, res, next) => {
     if (typeof signature !== "string") throw new HttpError(400, "Missing Stripe signature header");
     if (!Buffer.isBuffer(req.body)) throw new HttpError(400, "Expected raw request body");
 
-    await handleStripeWebhook(req.body, signature, env.STRIPE_WEBHOOK_SECRET);
+    const webhookSecret = await getStripeWebhookSecret();
+    if (!webhookSecret) throw new HttpError(503, "Stripe webhook secret isn't configured yet.");
+
+    await handleStripeWebhook(req.body, signature, webhookSecret);
     res.status(200).json({ received: true });
   } catch (err) {
     next(err);

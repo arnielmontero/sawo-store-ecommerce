@@ -1,7 +1,7 @@
 import Stripe from "stripe";
 import { OrderStatus, StockAdjustmentReason } from "@prisma/client";
 import { prisma } from "../lib/prisma";
-import { stripe } from "../lib/stripe";
+import { getStripe } from "../lib/stripe";
 import { HttpError } from "../middleware/errorHandler";
 import { getOrderById, setOrderStatus, updateOrderStatus } from "./order.service";
 import { restockCommittedStock } from "./inventory.service";
@@ -29,6 +29,7 @@ export async function createPaymentIntent(orderId: number) {
 
   const idempotencyKey = `${orderId}-${updated.paymentAttemptCount}`;
 
+  const stripe = await getStripe();
   const intent = await stripe.paymentIntents.create(
     {
       amount: updated.totalCents,
@@ -58,6 +59,7 @@ async function recordCardMetadata(orderId: number, intent: Stripe.PaymentIntent)
       typeof intent.payment_method === "string" ? intent.payment_method : intent.payment_method?.id;
     if (!paymentMethodId) return;
 
+    const stripe = await getStripe();
     const paymentMethod = await stripe.paymentMethods.retrieve(paymentMethodId);
     await prisma.order.update({
       where: { id: orderId },
@@ -81,7 +83,10 @@ async function recordCardMetadata(orderId: number, intent: Stripe.PaymentIntent)
 export async function handleStripeWebhook(rawBody: Buffer, signature: string, webhookSecret: string) {
   let event: Stripe.Event;
   try {
-    event = stripe.webhooks.constructEvent(rawBody, signature, webhookSecret);
+    // Static namespace — signature verification is pure HMAC over the
+    // webhook secret, no live API key/network call needed, so this doesn't
+    // go through getStripe() (which requires a configured secret key).
+    event = Stripe.webhooks.constructEvent(rawBody, signature, webhookSecret);
   } catch {
     throw new HttpError(400, "Invalid webhook signature");
   }
@@ -221,6 +226,7 @@ export async function refundOrder(orderId: number, input: RefundInput = {}) {
     }
   }
 
+  const stripe = await getStripe();
   const stripeRefund = await stripe.refunds.create({
     payment_intent: order.stripePaymentIntentId,
     amount: amountCents,

@@ -26,6 +26,14 @@ const updateSettingsSchema = z.object({
   logoUrl: z.string().url().nullable().optional(),
   allowPartialRefunds: z.boolean().optional(),
   defaultCarrier: z.string().min(1).max(40).optional(),
+  // Sandbox/test API credentials — see lib/credentials.ts. Trimmed and
+  // treated as "leave unchanged" when empty, so re-saving the form without
+  // touching a key field never blanks out what was already stored (the
+  // frontend never has the real value to send back, only whether it's set —
+  // see settings.service.ts's getStoreSettings).
+  stripeSecretKey: z.string().max(500).optional(),
+  stripeWebhookSecret: z.string().max(500).optional(),
+  easypostApiKey: z.string().max(500).optional(),
 });
 
 settingsRouter.patch("/", requireRole(AdminRole.ADMIN), async (req, res, next) => {

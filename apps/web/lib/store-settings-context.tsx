@@ -22,7 +22,15 @@ export function StoreSettingsProvider({ children }: { children: ReactNode }) {
     fetchStoreSettings()
       .then(setSettings)
       .catch(() =>
-        setSettings({ storeName: DEFAULT_STORE_NAME, logoUrl: null, allowPartialRefunds: false, defaultCarrier: "USPS" })
+        setSettings({
+          storeName: DEFAULT_STORE_NAME,
+          logoUrl: null,
+          allowPartialRefunds: false,
+          defaultCarrier: "USPS",
+          stripeSecretKeySet: false,
+          stripeWebhookSecretSet: false,
+          easypostApiKeySet: false,
+        })
       );
   }, [user]);
 

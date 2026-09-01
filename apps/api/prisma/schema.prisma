@@ -688,7 +688,19 @@ model StoreSettings {
   allowPartialRefunds Boolean  @default(false)
   // Used when an order's shippingCountry has no matching CarrierRule.
   defaultCarrier      String   @default("USPS")
-  updatedAt           DateTime @updatedAt
+
+  // Sandbox/test API credentials for external integrations, editable from
+  // Configuration instead of the server's .env file — see
+  // lib/credentials.ts, which resolves these with an .env fallback so an
+  // existing deployment configured only via .env keeps working unchanged.
+  // Stored as plain text: these are TEST-mode secrets for a local admin
+  // tool, not production credentials — same trust boundary as the rest of
+  // this table (ADMIN-only write, see settings.routes.ts).
+  stripeSecretKey      String? @db.Text
+  stripeWebhookSecret  String? @db.Text
+  easypostApiKey       String? @db.Text
+
+  updatedAt DateTime @updatedAt
 }
 
 // Country -> carrier assignment rules, editable from Configuration. Checked

@@ -868,6 +868,12 @@ export interface StoreSettings {
   logoUrl: string | null;
   allowPartialRefunds: boolean;
   defaultCarrier: string;
+  // Whether each sandbox credential is configured (DB or .env) — the real
+  // secret value never travels to the browser, see settings.service.ts's
+  // getStoreSettings.
+  stripeSecretKeySet: boolean;
+  stripeWebhookSecretSet: boolean;
+  easypostApiKeySet: boolean;
 }
 
 export async function fetchStoreSettings(): Promise<StoreSettings> {
@@ -895,6 +901,21 @@ export async function setDefaultCarrier(defaultCarrier: string): Promise<StoreSe
   const data = await apiFetch("/api/v1/settings", {
     method: "PATCH",
     body: JSON.stringify({ defaultCarrier }),
+  });
+  return data.settings;
+}
+
+// Any field left blank is left unchanged server-side — see
+// settings.service.ts's updateStoreSettings. Pass only the keys actually
+// being changed.
+export async function setSandboxCredentials(input: {
+  stripeSecretKey?: string;
+  stripeWebhookSecret?: string;
+  easypostApiKey?: string;
+}): Promise<StoreSettings> {
+  const data = await apiFetch("/api/v1/settings", {
+    method: "PATCH",
+    body: JSON.stringify(input),
   });
   return data.settings;
 }

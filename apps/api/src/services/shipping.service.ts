@@ -1,6 +1,6 @@
 import { OrderStatus } from "@prisma/client";
 import { prisma } from "../lib/prisma";
-import { easypost } from "../lib/easypost";
+import { getEasypost } from "../lib/easypost";
 import { HttpError } from "../middleware/errorHandler";
 import { updateOrderStatus } from "./order.service";
 
@@ -38,6 +38,7 @@ const EASYPOST_TEST_TRACKING_CODE = "EZ2000000002";
 // blocks the order actually being marked shipped, same "nice-to-have
 // display detail" tradeoff as payment.service.ts's recordCardMetadata.
 async function createTracker(trackingNumber: string, carrier: string | null) {
+  const easypost = await getEasypost();
   if (!easypost) return null;
   try {
     const isLikelyTestInput = process.env.NODE_ENV !== "production";
@@ -84,7 +85,9 @@ export async function shipOrder(orderId: number, trackingNumber: string, carrier
 // lookup shouldn't block the rest of the list from refreshing.
 export async function refreshDeliveryStatus(orderId: number) {
   const order = await prisma.order.findUnique({ where: { id: orderId } });
-  if (!order?.easypostTrackerId || !easypost) return order;
+  if (!order?.easypostTrackerId) return order;
+  const easypost = await getEasypost();
+  if (!easypost) return order;
 
   try {
     const tracker = await easypost.Tracker.retrieve(order.easypostTrackerId);

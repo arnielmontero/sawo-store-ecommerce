@@ -1,10 +1,12 @@
 import EasyPost from "@easypost/api";
-import { env } from "./env";
+import { getEasypostApiKey } from "./credentials";
 
-// Null when EASYPOST_API_KEY isn't set (e.g. a fresh dev checkout before
-// signing up for a sandbox key) — callers must check for this rather than
-// this module throwing at import time, so the rest of the app still runs
-// without live tracking configured. Mirrors STRIPE_SECRET_KEY being
-// required, except tracking is a nice-to-have on top of shipping, not a
-// blocking payment path, so it degrades instead of failing startup.
-export const easypost = env.EASYPOST_API_KEY ? new EasyPost(env.EASYPOST_API_KEY) : null;
+// Built fresh per call (not a module-level singleton) because the API key
+// can now come from StoreSettings and change at runtime via Configuration.
+// Returns null when no key is configured anywhere (DB or .env) — callers
+// treat that as "tracking isn't set up yet" and degrade gracefully (see
+// shipping.service.ts), same as before this became runtime-configurable.
+export async function getEasypost() {
+  const apiKey = await getEasypostApiKey();
+  return apiKey ? new EasyPost(apiKey) : null;
+}
