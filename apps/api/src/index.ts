@@ -22,7 +22,7 @@ import { errorHandler, notFoundHandler } from "./middleware/errorHandler";
 const app = express();
 
 app.use(helmet());
-app.use(cors({ origin: env.WEB_ORIGIN, credentials: true }));
+app.use(cors({ origin: [env.WEB_ORIGIN, env.WEBSHOP_ORIGIN], credentials: true }));
 
 // Stripe webhook needs the raw, unparsed body to verify its signature, so
 // this is registered BEFORE express.json() and scoped to only this path —

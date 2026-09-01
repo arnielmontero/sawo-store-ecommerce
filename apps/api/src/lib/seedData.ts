@@ -1,6 +1,16 @@
 import { OrderStatus, PaymentMethod, AdminRole, StockAdjustmentReason, ReturnRequestStatus } from "@prisma/client";
 import { prisma } from "./prisma";
 import { hashPassword } from "./password";
+import { env } from "./env";
+
+// Product photos referenced by seed data below live on disk at
+// apps/api/uploads/seed/<file> (downloaded from sawo.com's real product
+// catalog — this is SAWO's own e-commerce build, so its own product
+// photography is the correct source) — never hot-linked to an external
+// host, so the storefront only ever loads images from our own API.
+function seedImage(filename: string): string {
+  return `${env.API_BASE_URL}/uploads/seed/${filename}`;
+}
 
 async function seedAdmins() {
   const adminPasswordHash = await hashPassword("admin123");
@@ -77,18 +87,35 @@ interface ProductSeed {
   categorySlug: string;
   tags?: string[];
   variants: VariantSeed[];
+  // Local filenames under apps/api/uploads/seed/ (see seedImage() above) —
+  // first entry becomes the featured ProductImage. Left unset means the
+  // product genuinely has no photo yet, matching a real admin-entered
+  // product before someone uploads one — never filled with a placeholder
+  // or unrelated stock photo.
+  imageFilenames?: string[];
 }
 
 // A sauna equipment retailer's actual catalog shape — heaters, stones,
 // control panels, benches/backrests, doors/glass, and lighting/accessories,
-// matching how SAWO's real product line is organized.
-const CATEGORIES = [
-  { name: "Heaters", slug: "heaters" },
-  { name: "Sauna Stones", slug: "sauna-stones" },
-  { name: "Control Panels", slug: "control-panels" },
-  { name: "Benches & Backrests", slug: "benches-backrests" },
-  { name: "Doors & Glass", slug: "doors-glass" },
-  { name: "Lighting & Accessories", slug: "lighting-accessories" },
+// matching how SAWO's real product line is organized. Grouped under two
+// top-level parents (Sauna Essentials / Sauna Accessories) so the webshop's
+// storefront nav can render a nested "Category > Subcategory" sidebar like
+// SAWO's real site — parentSlug is resolved to a Category row in
+// seedCatalog() below and is undefined for the top-level parents themselves.
+const CATEGORIES: { name: string; slug: string; parentSlug?: string }[] = [
+  { name: "Sauna Essentials", slug: "sauna-essentials" },
+  { name: "Sauna Accessories", slug: "sauna-accessories" },
+
+  { name: "Heaters", slug: "heaters", parentSlug: "sauna-essentials" },
+  { name: "Control Panels", slug: "control-panels", parentSlug: "sauna-essentials" },
+  { name: "Doors & Glass", slug: "doors-glass", parentSlug: "sauna-essentials" },
+
+  { name: "Benches & Backrests", slug: "benches-backrests", parentSlug: "sauna-accessories" },
+  { name: "Lighting & Accessories", slug: "lighting-accessories", parentSlug: "sauna-accessories" },
+  { name: "Buckets & Ladles", slug: "buckets-ladles", parentSlug: "sauna-accessories" },
+  { name: "Clocks & Timers", slug: "clocks-timers", parentSlug: "sauna-accessories" },
+  { name: "Headrests", slug: "headrests", parentSlug: "sauna-accessories" },
+
   // Deliberately has no products in PRODUCTS below — gives the Categories
   // panel (Catalog -> "Categories") a ready example of a deletable category
   // to test against, alongside the others which are all correctly
@@ -104,6 +131,7 @@ const PRODUCTS: ProductSeed[] = [
     basePriceCents: 64900,
     categorySlug: "heaters",
     tags: ["bestseller", "electric"],
+    imageFilenames: ["heater-nordic-electric.webp"],
     variants: [
       { sku: "HTR-NORD-6KW", priceCents: 64900, attributes: { power: "6kW", roomSize: "70-130 ft³" }, stockQuantity: 22 },
       { sku: "HTR-NORD-8KW", priceCents: 71900, attributes: { power: "8kW", roomSize: "130-210 ft³" }, stockQuantity: 18 },
@@ -118,6 +146,7 @@ const PRODUCTS: ProductSeed[] = [
     compareAtPriceCents: 109900,
     categorySlug: "heaters",
     tags: ["new", "digital"],
+    imageFilenames: ["heater-innova-digital.webp"],
     variants: [
       { sku: "HTR-INV-8KW", priceCents: 94900, attributes: { power: "8kW", roomSize: "130-210 ft³" }, stockQuantity: 10 },
       { sku: "HTR-INV-10KW", priceCents: 104900, attributes: { power: "10kW", roomSize: "210-310 ft³" }, stockQuantity: 7 },
@@ -130,32 +159,10 @@ const PRODUCTS: ProductSeed[] = [
     basePriceCents: 82900,
     categorySlug: "heaters",
     tags: ["outdoor", "wood-burning"],
+    imageFilenames: ["heater-barrel-wood.webp"],
     variants: [
       { sku: "HTR-WOOD-16", priceCents: 82900, attributes: { power: "16kW equiv", material: "Cast Iron" }, stockQuantity: 9 },
       { sku: "HTR-WOOD-20", priceCents: 92900, attributes: { power: "20kW equiv", material: "Cast Iron" }, stockQuantity: 5 },
-    ],
-  },
-  {
-    title: "Finnish Peridotite Sauna Stones",
-    slug: "finnish-peridotite-sauna-stones",
-    description: "Hand-selected peridotite stones from Finland — high heat capacity, low crumble rate.",
-    basePriceCents: 4900,
-    categorySlug: "sauna-stones",
-    tags: ["bestseller"],
-    variants: [
-      { sku: "STN-PERI-22LB", priceCents: 4900, attributes: { weight: "22 lb", type: "Peridotite" }, stockQuantity: 90 },
-      { sku: "STN-PERI-44LB", priceCents: 8900, attributes: { weight: "44 lb", type: "Peridotite" }, stockQuantity: 55 },
-    ],
-  },
-  {
-    title: "Olivine Diabase Sauna Stones",
-    slug: "olivine-diabase-sauna-stones",
-    description: "Dense volcanic stones that hold heat longer for a smoother steam (löyly).",
-    basePriceCents: 5900,
-    categorySlug: "sauna-stones",
-    variants: [
-      { sku: "STN-OLIV-22LB", priceCents: 5900, attributes: { weight: "22 lb", type: "Olivine Diabase" }, stockQuantity: 40 },
-      { sku: "STN-OLIV-44LB", priceCents: 10900, attributes: { weight: "44 lb", type: "Olivine Diabase" }, stockQuantity: 26 },
     ],
   },
   {
@@ -165,6 +172,7 @@ const PRODUCTS: ProductSeed[] = [
     basePriceCents: 38900,
     categorySlug: "control-panels",
     tags: ["digital", "new"],
+    imageFilenames: ["control-innova-touch.webp"],
     variants: [
       { sku: "CTL-TOUCH-BLK", priceCents: 38900, attributes: { finish: "Black", interface: "Touchscreen" }, stockQuantity: 20 },
       { sku: "CTL-TOUCH-WHT", priceCents: 38900, attributes: { finish: "White", interface: "Touchscreen" }, stockQuantity: 14 },
@@ -176,6 +184,7 @@ const PRODUCTS: ProductSeed[] = [
     description: "Simple dial-based timer and thermostat control, compatible with most residential heaters.",
     basePriceCents: 14900,
     categorySlug: "control-panels",
+    imageFilenames: ["control-classic-analog.webp"],
     variants: [
       { sku: "CTL-ANLG-STD", priceCents: 14900, attributes: { finish: "Brushed Steel", interface: "Analog" }, stockQuantity: 33 },
     ],
@@ -187,6 +196,7 @@ const PRODUCTS: ProductSeed[] = [
     basePriceCents: 54900,
     categorySlug: "benches-backrests",
     tags: ["bestseller"],
+    imageFilenames: ["bench-abachi.webp"],
     variants: [
       { sku: "BNCH-ABACHI-5FT", priceCents: 54900, attributes: { length: "5 ft", wood: "Abachi" }, stockQuantity: 15 },
       { sku: "BNCH-ABACHI-6FT", priceCents: 61900, attributes: { length: "6 ft", wood: "Abachi" }, stockQuantity: 11 },
@@ -199,6 +209,7 @@ const PRODUCTS: ProductSeed[] = [
     description: "Ergonomic western red cedar backrest, naturally rot- and insect-resistant.",
     basePriceCents: 18900,
     categorySlug: "benches-backrests",
+    imageFilenames: ["backrest-cedar.webp"],
     variants: [
       { sku: "BCK-CEDAR-3FT", priceCents: 18900, attributes: { length: "3 ft", wood: "Cedar" }, stockQuantity: 24 },
       { sku: "BCK-CEDAR-4FT", priceCents: 22900, attributes: { length: "4 ft", wood: "Cedar" }, stockQuantity: 17 },
@@ -212,6 +223,7 @@ const PRODUCTS: ProductSeed[] = [
     compareAtPriceCents: 52900,
     categorySlug: "doors-glass",
     tags: ["popular"],
+    imageFilenames: ["door-frameless-glass.webp"],
     variants: [
       { sku: "DOOR-GLS-CLR", priceCents: 44900, attributes: { tint: "Clear", thickness: "8mm" }, stockQuantity: 13 },
       { sku: "DOOR-GLS-BRZ", priceCents: 46900, attributes: { tint: "Bronze", thickness: "8mm" }, stockQuantity: 9 },
@@ -223,6 +235,7 @@ const PRODUCTS: ProductSeed[] = [
     description: "Tempered glass insert set in a solid cedar frame for a more traditional look.",
     basePriceCents: 39900,
     categorySlug: "doors-glass",
+    imageFilenames: ["door-cedar-framed.webp"],
     variants: [
       { sku: "DOOR-CDR-CLR", priceCents: 39900, attributes: { tint: "Clear", frame: "Cedar" }, stockQuantity: 8 },
     ],
@@ -234,6 +247,7 @@ const PRODUCTS: ProductSeed[] = [
     basePriceCents: 32900,
     categorySlug: "lighting-accessories",
     tags: ["new"],
+    imageFilenames: ["light-fiber-optic.png"],
     variants: [
       { sku: "LGT-FIBER-150", priceCents: 32900, attributes: { strands: "150", driver: "RGB LED" }, stockQuantity: 19 },
     ],
@@ -243,10 +257,24 @@ const PRODUCTS: ProductSeed[] = [
     slug: "sauna-bucket-ladle-set",
     description: "Solid cedar bucket and matching ladle for pouring water over the stones.",
     basePriceCents: 6900,
-    categorySlug: "lighting-accessories",
-    tags: ["everyday"],
+    categorySlug: "buckets-ladles",
+    tags: ["everyday", "bestseller"],
+    imageFilenames: ["bucket-cedar-ladle.webp"],
     variants: [
       { sku: "ACC-BUCKET-CDR", priceCents: 6900, attributes: { wood: "Cedar" }, stockQuantity: 60 },
+      { sku: "ACC-BUCKET-ASP", priceCents: 6900, attributes: { wood: "Aspen" }, stockQuantity: 45 },
+      { sku: "ACC-BUCKET-HEM", priceCents: 7400, attributes: { wood: "Hemlock" }, stockQuantity: 30 },
+    ],
+  },
+  {
+    title: "Stainless Steel Bucket & Ladle Set",
+    slug: "stainless-steel-bucket-ladle-set",
+    description: "Brushed stainless steel bucket and ladle — corrosion-resistant, easy to clean, modern look.",
+    basePriceCents: 8900,
+    categorySlug: "buckets-ladles",
+    imageFilenames: ["bucket-steel.webp"],
+    variants: [
+      { sku: "ACC-BUCKET-STL", priceCents: 8900, attributes: { finish: "Brushed Steel" }, stockQuantity: 28 },
     ],
   },
   {
@@ -254,20 +282,83 @@ const PRODUCTS: ProductSeed[] = [
     slug: "sauna-thermometer-hygrometer",
     description: "Combined analog thermometer and hygrometer on a cedar backing, rated for high-heat rooms.",
     basePriceCents: 3900,
-    categorySlug: "lighting-accessories",
+    categorySlug: "clocks-timers",
+    imageFilenames: ["thermometer-hygrometer.webp"],
     variants: [
       { sku: "ACC-THERM-CDR", priceCents: 3900, attributes: { wood: "Cedar" }, stockQuantity: 75 },
+    ],
+  },
+  {
+    title: "Loisto Wooden Sand Timer",
+    slug: "loisto-wooden-sand-timer",
+    description: "15-minute sand timer in a solid cedar frame — a classic analog companion for the sauna bench.",
+    basePriceCents: 2900,
+    categorySlug: "clocks-timers",
+    tags: ["bestseller"],
+    imageFilenames: ["sand-timer.webp"],
+    variants: [
+      { sku: "ACC-TIMER-CDR", priceCents: 2900, attributes: { wood: "Cedar", duration: "15 min" }, stockQuantity: 80 },
+    ],
+  },
+  {
+    title: "Round Wooden Wall Clock",
+    slug: "round-wooden-wall-clock",
+    description: "Moisture-resistant wall clock with a solid wood face, built to withstand sauna humidity.",
+    basePriceCents: 4900,
+    categorySlug: "clocks-timers",
+    imageFilenames: ["wall-clock.webp"],
+    variants: [
+      { sku: "ACC-CLOCK-CDR", priceCents: 4900, attributes: { wood: "Cedar" }, stockQuantity: 40 },
+      { sku: "ACC-CLOCK-ASP", priceCents: 4900, attributes: { wood: "Aspen" }, stockQuantity: 35 },
+    ],
+  },
+  {
+    title: "Contoured Cedar Headrest",
+    slug: "contoured-cedar-headrest",
+    description: "Curved cedar headrest that hooks over the top bench for a relaxed recline.",
+    basePriceCents: 5900,
+    categorySlug: "headrests",
+    tags: ["bestseller"],
+    imageFilenames: ["headrest-cedar.webp"],
+    variants: [
+      { sku: "ACC-HEADREST-CDR", priceCents: 5900, attributes: { wood: "Cedar" }, stockQuantity: 50 },
+      { sku: "ACC-HEADREST-ASP", priceCents: 5900, attributes: { wood: "Aspen" }, stockQuantity: 38 },
+    ],
+  },
+  {
+    title: "Abachi Wood Headrest",
+    slug: "abachi-wood-headrest",
+    description: "Lightweight, low-resin Abachi headrest that stays cool to the touch on high benches.",
+    basePriceCents: 6900,
+    categorySlug: "headrests",
+    imageFilenames: ["headrest-abachi.webp"],
+    variants: [
+      { sku: "ACC-HEADREST-ABC", priceCents: 6900, attributes: { wood: "Abachi" }, stockQuantity: 22 },
     ],
   },
 ];
 
 async function seedCatalog() {
   const categoriesBySlug = new Map<string, number>();
-  for (const category of CATEGORIES) {
+  // Two passes: parents (no parentSlug) first, then children — a child's
+  // create needs its parent's id to already be in categoriesBySlug.
+  for (const category of CATEGORIES.filter((c) => !c.parentSlug)) {
     const created = await prisma.category.upsert({
       where: { slug: category.slug },
       update: {},
-      create: category,
+      create: { name: category.name, slug: category.slug },
+    });
+    categoriesBySlug.set(category.slug, created.id);
+  }
+  for (const category of CATEGORIES.filter((c) => c.parentSlug)) {
+    const created = await prisma.category.upsert({
+      where: { slug: category.slug },
+      update: { parentId: categoriesBySlug.get(category.parentSlug!) },
+      create: {
+        name: category.name,
+        slug: category.slug,
+        parentId: categoriesBySlug.get(category.parentSlug!),
+      },
     });
     categoriesBySlug.set(category.slug, created.id);
   }
@@ -286,6 +377,17 @@ async function seedCatalog() {
         categoryId: categoriesBySlug.get(productSeed.categorySlug),
       },
     });
+
+    if (productSeed.imageFilenames && productSeed.imageFilenames.length > 0) {
+      const existingImages = await prisma.productImage.findMany({ where: { productId: product.id } });
+      if (existingImages.length === 0) {
+        for (const [index, filename] of productSeed.imageFilenames.entries()) {
+          await prisma.productImage.create({
+            data: { productId: product.id, url: seedImage(filename), position: index, isFeatured: index === 0 },
+          });
+        }
+      }
+    }
 
     if (productSeed.tags && productSeed.tags.length > 0) {
       for (const tagName of productSeed.tags) {
@@ -380,22 +482,19 @@ const ORDERS: OrderSeed[] = [
     paymentMethod: PaymentMethod.PAY_WITH_CHECK,
     isNewClient: false,
     customerIndex: 0,
-    lines: [
-      { sku: "HTR-NORD-8KW", quantity: 1 },
-      { sku: "STN-PERI-44LB", quantity: 2 },
-    ],
+    lines: [{ sku: "HTR-NORD-8KW", quantity: 1 }],
     stripePaymentIntentId: "pi_seed_001",
     shippingAddress: ADDRESSES[0],
     trackingNumber: "1Z999AA10123456784",
     daysAgo: 2,
   },
   {
-    reference: "SAW-STN-0044",
+    reference: "SAW-BKT-0044",
     status: OrderStatus.PENDING,
     paymentMethod: PaymentMethod.PAYPAL,
     isNewClient: true,
     customerIndex: 1,
-    lines: [{ sku: "STN-OLIV-22LB", quantity: 1 }],
+    lines: [{ sku: "ACC-BUCKET-ASP", quantity: 1 }],
     daysAgo: 0,
   },
   {
@@ -496,12 +595,12 @@ const ORDERS: OrderSeed[] = [
     daysAgo: 20,
   },
   {
-    reference: "SAW-STN-0045",
+    reference: "SAW-THM-0045",
     status: OrderStatus.DELIVERED,
     paymentMethod: PaymentMethod.BANK,
     isNewClient: true,
     customerIndex: 9,
-    lines: [{ sku: "STN-PERI-22LB", quantity: 3 }],
+    lines: [{ sku: "ACC-THERM-CDR", quantity: 3 }],
     stripePaymentIntentId: "pi_seed_009",
     shippingAddress: ADDRESSES[3],
     trackingNumber: "1Z999AA10123456789",
@@ -620,21 +719,21 @@ async function seedPartialRefundExample(customers: { id: number }[], variantsByS
   );
 
   const heaterSku = "HTR-NORD-9KW";
-  const stoneSku = "STN-OLIV-44LB";
+  const bucketSku = "ACC-BUCKET-CDR";
   const heaterPriceCents = priceBySku.get(heaterSku)!;
-  const stonePriceCents = priceBySku.get(stoneSku)!;
-  const stoneQuantity = 2;
-  const subtotalCents = heaterPriceCents + stonePriceCents * stoneQuantity;
+  const bucketPriceCents = priceBySku.get(bucketSku)!;
+  const bucketQuantity = 2;
+  const subtotalCents = heaterPriceCents + bucketPriceCents * bucketQuantity;
 
   const placedAt = new Date(Date.now() - 10 * 24 * 60 * 60 * 1000);
   const paidAt = new Date(placedAt.getTime() + 20 * 60 * 1000);
   const refundedAt = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000);
 
-  // One bag of stones arrived cracked — customer keeps the heater and the
-  // other bag, gets refunded for just the damaged unit, and that one unit
+  // One cedar bucket arrived cracked — customer keeps the heater and the
+  // other bucket, gets refunded for just the damaged unit, and that one unit
   // is restocked. The order stays PARTIALLY_REFUNDED (not fully resolved)
   // since the heater itself was never returned.
-  const refundAmountCents = stonePriceCents;
+  const refundAmountCents = bucketPriceCents;
 
   const order = await prisma.order.create({
     data: {
@@ -653,7 +752,7 @@ async function seedPartialRefundExample(customers: { id: number }[], variantsByS
       items: {
         create: [
           { variantId: variantsBySku.get(heaterSku)!, quantity: 1, unitPriceCents: heaterPriceCents },
-          { variantId: variantsBySku.get(stoneSku)!, quantity: stoneQuantity, unitPriceCents: stonePriceCents },
+          { variantId: variantsBySku.get(bucketSku)!, quantity: bucketQuantity, unitPriceCents: bucketPriceCents },
         ],
       },
       statusHistory: {
@@ -665,7 +764,7 @@ async function seedPartialRefundExample(customers: { id: number }[], variantsByS
       },
       notes: {
         create: {
-          body: "Customer reported one bag of Olivine Diabase stones arrived cracked. Refunded the single damaged unit and restocked it after inspection; heater and remaining stone bag were kept, no further action needed.",
+          body: "Customer reported one cedar bucket arrived cracked. Refunded the single damaged unit and restocked it after inspection; heater and remaining bucket were kept, no further action needed.",
           authorName: "Admin",
           createdAt: refundedAt,
         },
@@ -674,7 +773,7 @@ async function seedPartialRefundExample(customers: { id: number }[], variantsByS
     include: { items: true },
   });
 
-  const stoneItem = order.items.find((item) => item.variantId === variantsBySku.get(stoneSku))!;
+  const bucketItem = order.items.find((item) => item.variantId === variantsBySku.get(bucketSku))!;
 
   await prisma.refundRecord.create({
     data: {
@@ -682,7 +781,7 @@ async function seedPartialRefundExample(customers: { id: number }[], variantsByS
       amountCents: refundAmountCents,
       stripeRefundId: "re_seed_001",
       createdAt: refundedAt,
-      items: { create: { orderItemId: stoneItem.id, quantity: 1 } },
+      items: { create: { orderItemId: bucketItem.id, quantity: 1 } },
     },
   });
 }
@@ -968,17 +1067,17 @@ async function seedReturnRequestExamples(customers: { id: number }[], variantsBy
     });
   }
 
-  // Order 2: APPROVED — customer returned a bag of stones as the wrong
+  // Order 2: APPROVED — customer returned a bucket set as the wrong wood
   // type, staff reviewed and approved it. Built by hand with a completed
   // RefundRecord/restock (same reasoning as seedPartialRefundExample: no
   // live Stripe key here to actually process it), landing the order on
   // PARTIALLY_REFUNDED since only one of the two items is refunded.
   {
     const heaterSku = "HTR-NORD-8KW";
-    const stoneSku = "STN-PERI-44LB";
+    const bucketSku = "ACC-BUCKET-ASP";
     const heaterPriceCents = priceBySku.get(heaterSku)!;
-    const stonePriceCents = priceBySku.get(stoneSku)!;
-    const subtotalCents = heaterPriceCents + stonePriceCents;
+    const bucketPriceCents = priceBySku.get(bucketSku)!;
+    const subtotalCents = heaterPriceCents + bucketPriceCents;
 
     const placedAt = new Date(Date.now() - 15 * 24 * 60 * 60 * 1000);
     const paidAt = new Date(placedAt.getTime() + 8 * 60 * 1000);
@@ -996,7 +1095,7 @@ async function seedReturnRequestExamples(customers: { id: number }[], variantsBy
         userId: customers[4].id,
         subtotalCents,
         totalCents: subtotalCents,
-        refundedCents: stonePriceCents,
+        refundedCents: bucketPriceCents,
         stripePaymentIntentId: "pi_seed_017",
         paymentAttemptCount: 1,
         shippingAddress: ADDRESSES[3],
@@ -1004,7 +1103,7 @@ async function seedReturnRequestExamples(customers: { id: number }[], variantsBy
         items: {
           create: [
             { variantId: variantsBySku.get(heaterSku)!, quantity: 1, unitPriceCents: heaterPriceCents },
-            { variantId: variantsBySku.get(stoneSku)!, quantity: 1, unitPriceCents: stonePriceCents },
+            { variantId: variantsBySku.get(bucketSku)!, quantity: 1, unitPriceCents: bucketPriceCents },
           ],
         },
         statusHistory: {
@@ -1020,15 +1119,15 @@ async function seedReturnRequestExamples(customers: { id: number }[], variantsBy
       include: { items: true },
     });
 
-    const stoneItem = order.items.find((item) => item.variantId === variantsBySku.get(stoneSku))!;
+    const bucketItem = order.items.find((item) => item.variantId === variantsBySku.get(bucketSku))!;
 
     const refundRecord = await prisma.refundRecord.create({
       data: {
         orderId: order.id,
-        amountCents: stonePriceCents,
+        amountCents: bucketPriceCents,
         stripeRefundId: "re_seed_006",
         createdAt: resolvedAt,
-        items: { create: { orderItemId: stoneItem.id, quantity: 1 } },
+        items: { create: { orderItemId: bucketItem.id, quantity: 1 } },
       },
     });
 
@@ -1036,14 +1135,14 @@ async function seedReturnRequestExamples(customers: { id: number }[], variantsBy
       data: {
         orderId: order.id,
         status: ReturnRequestStatus.APPROVED,
-        reason: "Customer ordered the wrong stone type (Peridotite instead of Olivine Diabase) — keeping the heater.",
+        reason: "Customer ordered the wrong wood type (Aspen instead of Cedar) — keeping the heater.",
         loggedByName: "Admin",
         createdAt: requestedAt,
         resolvedByName: "Admin",
         resolvedAt,
-        reviewNote: "Confirmed unopened, approved full refund for the stones.",
+        reviewNote: "Confirmed unopened, approved full refund for the bucket set.",
         refundRecordId: refundRecord.id,
-        items: { create: { orderItemId: stoneItem.id, quantity: 1 } },
+        items: { create: { orderItemId: bucketItem.id, quantity: 1 } },
       },
     });
   }
@@ -1360,7 +1459,6 @@ async function seedCartLeadExamples(
       days: 3,
       items: [
         { sku: "HTR-INV-8KW", quantity: 1 },
-        { sku: "STN-PERI-44LB", quantity: 2 },
         { sku: "CTL-TOUCH-BLK", quantity: 1 },
       ],
     },
@@ -1370,7 +1468,7 @@ async function seedCartLeadExamples(
       days: 6,
       items: [
         { sku: "HTR-NORD-8KW", quantity: 1 },
-        { sku: "STN-PERI-44LB", quantity: 2 },
+        { sku: "ACC-BUCKET-HEM", quantity: 2 },
       ],
     },
     {
@@ -1481,8 +1579,6 @@ async function seedReviewAndQuestionExamples() {
     "nordic-electric-sauna-heater",
     "innova-digital-sauna-heater",
     "barrel-sauna-wood-heater",
-    "finnish-peridotite-sauna-stones",
-    "olivine-diabase-sauna-stones",
     "innova-touch-control-panel",
     "classic-analog-control-panel",
     "abachi-wood-sauna-bench-set",
@@ -1549,18 +1645,6 @@ async function seedReviewAndQuestionExamples() {
       rating: 3,
       body: "Does the job but the wood smell was much stronger than expected the first few weeks.",
       days: 25,
-    },
-    {
-      slug: "finnish-peridotite-sauna-stones",
-      rating: 5,
-      body: "Great steam, no cracking after three months of weekly use. Exactly the size I needed.",
-      days: 5,
-    },
-    {
-      slug: "olivine-diabase-sauna-stones",
-      rating: 4,
-      body: "Solid stones, though a few arrived with sharp edges — nothing a quick rinse and inspection didn't fix.",
-      days: 14,
     },
     {
       slug: "innova-touch-control-panel",
@@ -1643,16 +1727,6 @@ async function seedReviewAndQuestionExamples() {
       authorName: "Priya K.",
       question: "Can this run on a 220V single-phase supply, or does it need three-phase?",
       days: 1,
-      linkToReviewer: true,
-    },
-    {
-      slug: "finnish-peridotite-sauna-stones",
-      authorName: "Owen L.",
-      question: "How many kg do I need for an 8kW heater?",
-      answer: "For an 8kW heater we recommend around 20kg (44lb) of stones — this bag is sized for that.",
-      answeredByName: "Fulfillment Staff",
-      days: 7,
-      answeredDays: 6,
       linkToReviewer: true,
     },
     {

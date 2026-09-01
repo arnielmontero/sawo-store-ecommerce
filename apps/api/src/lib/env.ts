@@ -4,6 +4,10 @@ import { z } from "zod";
 const envSchema = z.object({
   PORT: z.coerce.number().default(4000),
   WEB_ORIGIN: z.string().url().default("http://localhost:3000"),
+  // The customer-facing storefront (apps/webshop) runs on its own origin —
+  // kept separate from WEB_ORIGIN (the admin backoffice) so either can
+  // change independently.
+  WEBSHOP_ORIGIN: z.string().url().default("http://localhost:3001"),
   // Base URL this API is reachable at, used to build absolute URLs for
   // uploaded files (e.g. http://localhost:4000/uploads/xyz.png) — the
   // frontend runs on a different origin, so a relative path wouldn't resolve.

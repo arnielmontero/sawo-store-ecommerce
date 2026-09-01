@@ -284,6 +284,36 @@ export async function listCategories() {
   });
 }
 
+// Public, unauthenticated category tree for the storefront nav — top-level
+// categories (parentId null) with their children nested underneath, each
+// carrying an active-product count so an empty branch can be hidden or
+// deprioritized client-side. Deliberately a separate query shape from the
+// flat admin listCategories() above (which the Catalog page's category
+// picker still uses) rather than reusing it, since the storefront always
+// wants the nested form and admin never does.
+export async function listCategoryTree() {
+  const categories = await prisma.category.findMany({
+    orderBy: { name: "asc" },
+    include: { _count: { select: { products: { where: { isActive: true } } } } },
+  });
+
+  const byParent = new Map<number | null, typeof categories>();
+  for (const category of categories) {
+    const key = category.parentId;
+    if (!byParent.has(key)) byParent.set(key, []);
+    byParent.get(key)!.push(category);
+  }
+
+  function withChildren(category: (typeof categories)[number]): typeof category & {
+    children: ReturnType<typeof withChildren>[];
+  } {
+    const children = (byParent.get(category.id) ?? []).map(withChildren);
+    return { ...category, children };
+  }
+
+  return (byParent.get(null) ?? []).map(withChildren);
+}
+
 export async function createCategory(name: string) {
   const trimmed = name.trim();
   if (!trimmed) throw new HttpError(400, "Category name can't be empty.");

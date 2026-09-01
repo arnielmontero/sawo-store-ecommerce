@@ -20,6 +20,7 @@ import {
   getProductById,
   getProductBySlug,
   listCategories,
+  listCategoryTree,
   listProducts,
   listTags,
   reorderProductImages,
@@ -62,6 +63,18 @@ productsRouter.get("/", async (req, res, next) => {
       sortDir,
     });
     res.json(result);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Public — nested category tree for the storefront nav (top-level
+// categories with their children), unlike /admin/categories which returns a
+// flat authenticated list for the admin's category picker/manager.
+productsRouter.get("/categories", async (_req, res, next) => {
+  try {
+    const categories = await listCategoryTree();
+    res.json({ categories });
   } catch (err) {
     next(err);
   }

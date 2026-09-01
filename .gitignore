@@ -6,3 +6,7 @@ dist/
 .env.local
 apps/api/uploads/*
 !apps/api/uploads/.gitkeep
+# Seed fixture photos (checked in, unlike real admin-uploaded runtime files
+# above) — referenced by apps/api/src/lib/seedData.ts so `npm run db:seed`
+# has real images to point ProductImage rows at on a fresh clone.
+!apps/api/uploads/seed/

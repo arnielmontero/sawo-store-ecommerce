@@ -83,7 +83,17 @@ model Category {
   name String
   slug String @unique
 
+  // Optional parent for a two-level nav (e.g. "Sauna Accessories" ->
+  // "Pails"/"Ladles") — self-relation so the storefront can render nested
+  // category groups. Null means top-level. Not restricted to two levels at
+  // the DB layer, but every current caller only walks one level down.
+  parentId Int?
+  parent   Category?  @relation("CategoryChildren", fields: [parentId], references: [id])
+  children Category[] @relation("CategoryChildren")
+
   products Product[]
+
+  @@index([parentId])
 }
 
 // Free-form labels a product can carry in addition to its single Category —
