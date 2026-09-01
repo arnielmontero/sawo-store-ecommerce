@@ -35,6 +35,10 @@ export interface Category {
   id: number;
   name: string;
   slug: string;
+  // Present when fetched via fetchCategories() (includes the product
+  // count); absent on categories embedded elsewhere (e.g. Product.category)
+  // that don't need it.
+  _count?: { products: number };
 }
 
 export interface Tag {
@@ -398,6 +402,26 @@ export async function fetchProducts(
 export async function fetchCategories(): Promise<Category[]> {
   const data = await apiFetch("/api/v1/products/admin/categories");
   return data.categories;
+}
+
+export async function createCategory(name: string): Promise<Category> {
+  const data = await apiFetch("/api/v1/products/admin/categories", {
+    method: "POST",
+    body: JSON.stringify({ name }),
+  });
+  return data.category;
+}
+
+export async function updateCategory(id: number, name: string): Promise<Category> {
+  const data = await apiFetch(`/api/v1/products/admin/categories/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify({ name }),
+  });
+  return data.category;
+}
+
+export async function deleteCategory(id: number): Promise<void> {
+  await apiFetch(`/api/v1/products/admin/categories/${id}`, { method: "DELETE" });
 }
 
 export async function fetchTags(): Promise<Tag[]> {

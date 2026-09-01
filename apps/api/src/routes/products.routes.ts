@@ -11,8 +11,10 @@ import {
   bulkAdjustPrice,
   bulkSetActive,
   bulkSetCategory,
+  createCategory,
   createProduct,
   deactivateProduct,
+  deleteCategory,
   deleteProductImage,
   generateVariantMatrix,
   getProductById,
@@ -24,6 +26,7 @@ import {
   setFeaturedImage,
   setVariantStock,
   setVariantActive,
+  updateCategory,
   updateProduct,
 } from "../services/product.service";
 import { exportProductsCsv, importProductsCsv } from "../services/productCsv.service";
@@ -96,6 +99,37 @@ adminRouter.get("/categories", async (_req, res, next) => {
   try {
     const categories = await listCategories();
     res.json({ categories });
+  } catch (err) {
+    next(err);
+  }
+});
+
+const categoryBodySchema = z.object({ name: z.string().min(1).max(60) });
+
+adminRouter.post("/categories", requireRole(AdminRole.ADMIN), async (req, res, next) => {
+  try {
+    const { name } = categoryBodySchema.parse(req.body);
+    const category = await createCategory(name);
+    res.status(201).json({ category });
+  } catch (err) {
+    next(err);
+  }
+});
+
+adminRouter.patch("/categories/:id", requireRole(AdminRole.ADMIN), async (req, res, next) => {
+  try {
+    const { name } = categoryBodySchema.parse(req.body);
+    const category = await updateCategory(Number(req.params.id), name);
+    res.json({ category });
+  } catch (err) {
+    next(err);
+  }
+});
+
+adminRouter.delete("/categories/:id", requireRole(AdminRole.ADMIN), async (req, res, next) => {
+  try {
+    await deleteCategory(Number(req.params.id));
+    res.status(204).send();
   } catch (err) {
     next(err);
   }

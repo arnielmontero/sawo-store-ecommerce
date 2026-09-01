@@ -278,7 +278,54 @@ export async function getProductById(id: number) {
 }
 
 export async function listCategories() {
-  return prisma.category.findMany({ orderBy: { name: "asc" } });
+  return prisma.category.findMany({
+    orderBy: { name: "asc" },
+    include: { _count: { select: { products: true } } },
+  });
+}
+
+export async function createCategory(name: string) {
+  const trimmed = name.trim();
+  if (!trimmed) throw new HttpError(400, "Category name can't be empty.");
+  const slug = slugify(trimmed);
+  if (!slug) throw new HttpError(400, "Category name must contain at least one letter or number.");
+
+  const existing = await prisma.category.findUnique({ where: { slug } });
+  if (existing) throw new HttpError(409, `A category named "${existing.name}" already exists.`);
+
+  return prisma.category.create({ data: { name: trimmed, slug } });
+}
+
+export async function updateCategory(id: number, name: string) {
+  const trimmed = name.trim();
+  if (!trimmed) throw new HttpError(400, "Category name can't be empty.");
+  const slug = slugify(trimmed);
+  if (!slug) throw new HttpError(400, "Category name must contain at least one letter or number.");
+
+  const category = await prisma.category.findUnique({ where: { id } });
+  if (!category) throw new HttpError(404, "Category not found");
+
+  const clash = await prisma.category.findUnique({ where: { slug } });
+  if (clash && clash.id !== id) throw new HttpError(409, `A category named "${clash.name}" already exists.`);
+
+  return prisma.category.update({ where: { id }, data: { name: trimmed, slug } });
+}
+
+export async function deleteCategory(id: number) {
+  const category = await prisma.category.findUnique({
+    where: { id },
+    include: { _count: { select: { products: true } } },
+  });
+  if (!category) throw new HttpError(404, "Category not found");
+
+  if (category._count.products > 0) {
+    throw new HttpError(
+      409,
+      `Can't delete "${category.name}" — ${category._count.products} product(s) still use it. Reassign or remove them first.`
+    );
+  }
+
+  await prisma.category.delete({ where: { id } });
 }
 
 export async function listTags() {

@@ -14,6 +14,7 @@ import {
 } from "@/lib/api";
 import { formatCents } from "@/lib/format";
 import { CatalogBulkBar } from "@/components/CatalogBulkBar";
+import { CategoriesPanel } from "@/components/CategoriesPanel";
 
 const LOW_STOCK_THRESHOLD = 10;
 // Kept in sync with the backend's NEW_PRODUCT_DAYS (product.service.ts) —
@@ -41,6 +42,7 @@ export default function CatalogPage() {
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [importResult, setImportResult] = useState<string | null>(null);
   const [importing, setImporting] = useState(false);
+  const [categoriesOpen, setCategoriesOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Debounce the search box so every keystroke doesn't fire a request.
@@ -63,9 +65,11 @@ export default function CatalogPage() {
       .finally(() => setLoading(false));
   }
 
-  useEffect(() => {
+  function loadCategories() {
     fetchCategories().then(setCategories).catch(() => {});
-  }, []);
+  }
+
+  useEffect(loadCategories, []);
 
   useEffect(load, [categoryFilter, search, page, sortBy, sortDir]);
 
@@ -130,6 +134,12 @@ export default function CatalogPage() {
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-semibold text-ink-900">Catalog</h1>
         <div className="flex items-center gap-3">
+          <button
+            onClick={() => setCategoriesOpen(true)}
+            className="rounded-md border border-ink-100 px-4 py-2 text-sm font-medium text-ink-700 hover:bg-gray-50"
+          >
+            Categories
+          </button>
           <button
             onClick={handleExport}
             className="rounded-md border border-ink-100 px-4 py-2 text-sm font-medium text-ink-700 hover:bg-gray-50"
@@ -396,6 +406,10 @@ export default function CatalogPage() {
           </div>
         )}
       </div>
+
+      {categoriesOpen && (
+        <CategoriesPanel onClose={() => setCategoriesOpen(false)} onChanged={loadCategories} />
+      )}
     </div>
   );
 }
