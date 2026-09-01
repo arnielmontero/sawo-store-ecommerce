@@ -657,3 +657,21 @@ export async function removeStoreLogo(): Promise<StoreSettings> {
   const data = await apiFetch("/api/v1/settings/logo", { method: "DELETE" });
   return data.settings;
 }
+
+// Both reset actions require the caller to pass the literal string "RESET"
+// as confirmation — the server re-validates this itself (see
+// settingsRouter's resetConfirmSchema) rather than trusting that the UI
+// enforced the type-to-confirm step, so this isn't just UI theater.
+export async function clearAllData(): Promise<{ message: string }> {
+  return apiFetch("/api/v1/settings/reset/clear", {
+    method: "POST",
+    body: JSON.stringify({ confirm: "RESET" }),
+  });
+}
+
+export async function resetSeedData(): Promise<{ message: string }> {
+  return apiFetch("/api/v1/settings/reset/seed", {
+    method: "POST",
+    body: JSON.stringify({ confirm: "RESET" }),
+  });
+}
