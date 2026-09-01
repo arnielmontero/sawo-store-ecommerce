@@ -177,6 +177,10 @@ export interface Customer {
   createdAt: string;
   orderCount: number;
   totalSpentCents: number;
+  // Total quantity across this customer's staff-logged cart-interest leads
+  // — not a real live cart (see CartLead in schema.prisma), just "how many
+  // units are currently on hold, not yet checked out."
+  cartItemCount: number;
 }
 
 export interface CustomersPage {

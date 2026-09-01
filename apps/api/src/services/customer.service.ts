@@ -33,6 +33,11 @@ export async function listCustomers(filters: ListCustomersFilters = {}) {
       take: PAGE_SIZE,
       include: {
         orders: { select: { totalCents: true, status: true } },
+        // Staff-logged "still deciding" items, not a real live cart (see
+        // schema.prisma's CartLead) — summed here so the list can show
+        // "how many units are sitting on hold" without a separate request
+        // per row.
+        cartLeads: { select: { items: { select: { quantity: true } } } },
       },
     }),
     prisma.user.count({ where }),
@@ -40,6 +45,10 @@ export async function listCustomers(filters: ListCustomersFilters = {}) {
 
   const customers = users.map((user) => {
     const completedOrders = user.orders.filter((o) => (COMPLETED_STATUSES as readonly string[]).includes(o.status));
+    const cartItemCount = user.cartLeads.reduce(
+      (sum, lead) => sum + lead.items.reduce((leadSum, item) => leadSum + item.quantity, 0),
+      0
+    );
     return {
       id: user.id,
       email: user.email,
@@ -47,6 +56,7 @@ export async function listCustomers(filters: ListCustomersFilters = {}) {
       createdAt: user.createdAt,
       orderCount: user.orders.length,
       totalSpentCents: completedOrders.reduce((sum, o) => sum + o.totalCents, 0),
+      cartItemCount,
     };
   });
 

@@ -62,6 +62,7 @@ export default function CustomersPage() {
                   <th className="px-3 py-3 font-medium">Joined</th>
                   <th className="px-3 py-3 font-medium">Orders</th>
                   <th className="px-3 py-3 font-medium">Total spent</th>
+                  <th className="px-3 py-3 font-medium">In cart</th>
                 </tr>
               </thead>
               <tbody>
@@ -78,6 +79,19 @@ export default function CustomersPage() {
                     </td>
                     <td className="px-3 py-3 text-ink-700">{customer.orderCount}</td>
                     <td className="px-3 py-3 text-ink-700">{formatCents(customer.totalSpentCents)}</td>
+                    <td className="px-3 py-3">
+                      {customer.cartItemCount > 0 ? (
+                        <Link
+                          href={`/customers/${customer.id}`}
+                          className="rounded-full bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-700 hover:bg-amber-100"
+                          title="Items logged as cart interest, not yet checked out"
+                        >
+                          {customer.cartItemCount} item{customer.cartItemCount === 1 ? "" : "s"}
+                        </Link>
+                      ) : (
+                        <span className="text-ink-300">—</span>
+                      )}
+                    </td>
                   </tr>
                 ))}
               </tbody>
