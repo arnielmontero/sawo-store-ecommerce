@@ -6,11 +6,20 @@ import {
   uploadStoreLogo,
   removeStoreLogo,
   setAllowPartialRefunds,
+  setDefaultCarrier,
+  fetchCarrierRules,
+  upsertCarrierRule,
+  deleteCarrierRule,
   clearAllData,
   resetSeedData,
+  type CarrierRule,
 } from "@/lib/api";
 import { useStoreSettings } from "@/lib/store-settings-context";
 import { useAuth } from "@/lib/auth-context";
+
+// Well-known carrier codes EasyPost recognizes for tracker/rate matching —
+// not exhaustive, just the common ones staff are likely to actually assign.
+const CARRIER_OPTIONS = ["USPS", "UPS", "FedEx", "DHL"];
 
 export default function ConfigurationPage() {
   const { user } = useAuth();
@@ -24,6 +33,21 @@ export default function ConfigurationPage() {
   const [refundsSaving, setRefundsSaving] = useState(false);
   const [refundsError, setRefundsError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const [carrierRules, setCarrierRules] = useState<CarrierRule[]>([]);
+  const [rulesLoading, setRulesLoading] = useState(true);
+  const [defaultCarrierSaving, setDefaultCarrierSaving] = useState(false);
+  const [ruleCountry, setRuleCountry] = useState("");
+  const [ruleCarrier, setRuleCarrier] = useState(CARRIER_OPTIONS[0]);
+  const [ruleSaving, setRuleSaving] = useState(false);
+  const [ruleError, setRuleError] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetchCarrierRules()
+      .then(setCarrierRules)
+      .catch(() => {})
+      .finally(() => setRulesLoading(false));
+  }, []);
 
   const [pendingReset, setPendingReset] = useState<"clear" | "seed" | null>(null);
   const [resetConfirmText, setResetConfirmText] = useState("");
@@ -93,6 +117,47 @@ export default function ConfigurationPage() {
       setRefundsError(err instanceof Error ? err.message : "Failed to update refund setting.");
     } finally {
       setRefundsSaving(false);
+    }
+  }
+
+  async function handleDefaultCarrierChange(next: string) {
+    setDefaultCarrierSaving(true);
+    try {
+      const updated = await setDefaultCarrier(next);
+      setSettings(updated);
+    } catch (err) {
+      setRuleError(err instanceof Error ? err.message : "Failed to update default carrier.");
+    } finally {
+      setDefaultCarrierSaving(false);
+    }
+  }
+
+  async function handleAddRule() {
+    setRuleError(null);
+    const country = ruleCountry.trim().toUpperCase();
+    if (country.length !== 2) {
+      setRuleError("Enter a 2-letter country code (e.g. US, DE).");
+      return;
+    }
+    setRuleSaving(true);
+    try {
+      const rule = await upsertCarrierRule(country, ruleCarrier);
+      setCarrierRules((prev) => [...prev.filter((r) => r.country !== rule.country), rule].sort((a, b) => a.country.localeCompare(b.country)));
+      setRuleCountry("");
+    } catch (err) {
+      setRuleError(err instanceof Error ? err.message : "Failed to save rule.");
+    } finally {
+      setRuleSaving(false);
+    }
+  }
+
+  async function handleDeleteRule(id: number) {
+    setRuleError(null);
+    try {
+      await deleteCarrierRule(id);
+      setCarrierRules((prev) => prev.filter((r) => r.id !== id));
+    } catch (err) {
+      setRuleError(err instanceof Error ? err.message : "Failed to delete rule.");
     }
   }
 
@@ -246,6 +311,109 @@ export default function ConfigurationPage() {
         </div>
         {refundsError && <p className="mt-3 text-sm text-brand-600">{refundsError}</p>}
         {!canEdit && <p className="mt-3 text-xs text-ink-400">Only Admin users can change this setting.</p>}
+      </div>
+
+      <div className="mt-6 max-w-xl rounded-xl border border-ink-100 bg-white p-6">
+        <p className="text-sm font-medium text-ink-900">Shipping &amp; carriers</p>
+        <p className="mt-1 text-xs text-ink-400">
+          A carrier is auto-assigned to every order at checkout based on the shipping country, using the rules
+          below. Staff can still override the carrier per-order from Deliveries before shipping.
+        </p>
+
+        <div className="mt-4">
+          <label className="block text-xs font-medium uppercase tracking-wide text-ink-500">
+            Default carrier
+          </label>
+          <p className="mt-1 text-xs text-ink-400">Used when a country has no matching rule below.</p>
+          <select
+            value={settings?.defaultCarrier ?? "USPS"}
+            onChange={(e) => canEdit && handleDefaultCarrierChange(e.target.value)}
+            disabled={!canEdit || defaultCarrierSaving}
+            className="mt-2 w-40 rounded-md border border-ink-100 px-3 py-2 text-sm outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500 disabled:bg-gray-50"
+          >
+            {CARRIER_OPTIONS.map((c) => (
+              <option key={c} value={c}>
+                {c}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div className="mt-6 border-t border-ink-100 pt-5">
+          <label className="block text-xs font-medium uppercase tracking-wide text-ink-500">
+            Country rules
+          </label>
+
+          {rulesLoading ? (
+            <p className="mt-2 text-sm text-ink-500">Loading...</p>
+          ) : carrierRules.length === 0 ? (
+            <p className="mt-2 text-sm text-ink-400">No country-specific rules yet — every order uses the default carrier.</p>
+          ) : (
+            <table className="mt-3 w-full text-left text-sm">
+              <thead>
+                <tr className="border-b border-ink-100 text-xs uppercase tracking-wide text-ink-500">
+                  <th className="py-2 font-medium">Country</th>
+                  <th className="py-2 font-medium">Carrier</th>
+                  {canEdit && <th className="py-2 font-medium"></th>}
+                </tr>
+              </thead>
+              <tbody>
+                {carrierRules.map((rule) => (
+                  <tr key={rule.id} className="border-b border-ink-100 last:border-0">
+                    <td className="py-2 font-mono text-ink-900">{rule.country}</td>
+                    <td className="py-2 text-ink-700">{rule.carrier}</td>
+                    {canEdit && (
+                      <td className="py-2 text-right">
+                        <button
+                          onClick={() => handleDeleteRule(rule.id)}
+                          className="text-xs font-medium text-brand-600 hover:underline"
+                        >
+                          Remove
+                        </button>
+                      </td>
+                    )}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+
+          {canEdit && (
+            <div className="mt-4 flex items-end gap-2">
+              <div>
+                <label className="block text-xs font-medium uppercase tracking-wide text-ink-500">Country</label>
+                <input
+                  value={ruleCountry}
+                  onChange={(e) => setRuleCountry(e.target.value.slice(0, 2))}
+                  placeholder="US"
+                  className="mt-1 w-20 rounded-md border border-ink-100 px-3 py-1.5 text-sm uppercase outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium uppercase tracking-wide text-ink-500">Carrier</label>
+                <select
+                  value={ruleCarrier}
+                  onChange={(e) => setRuleCarrier(e.target.value)}
+                  className="mt-1 rounded-md border border-ink-100 px-3 py-1.5 text-sm outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
+                >
+                  {CARRIER_OPTIONS.map((c) => (
+                    <option key={c} value={c}>
+                      {c}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <button
+                onClick={handleAddRule}
+                disabled={ruleSaving}
+                className="rounded-md bg-brand-500 px-3 py-1.5 text-sm font-medium text-white hover:bg-brand-600 disabled:opacity-50"
+              >
+                {ruleSaving ? "Saving..." : "Add rule"}
+              </button>
+            </div>
+          )}
+          {ruleError && <p className="mt-3 text-sm text-brand-600">{ruleError}</p>}
+        </div>
       </div>
 
       {canEdit && (

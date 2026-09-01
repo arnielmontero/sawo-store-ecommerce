@@ -6,6 +6,7 @@ import { toCsv } from "../lib/csv";
 import { priceCart, type CartLine } from "./pricing.service";
 import { reserveStock, releaseStock, commitReservedStock, restockCommittedStock } from "./inventory.service";
 import { resolveStaleOrderNotifications } from "./notification.service";
+import { assignCarrier } from "./carrier.service";
 
 const PAGE_SIZE = 20;
 
@@ -236,6 +237,7 @@ export interface CheckoutInput {
   items: CartLine[];
   paymentMethod: PaymentMethod;
   shippingAddress?: string;
+  shippingCountry?: string;
 }
 
 // Validates the cart, re-prices it server-side, reserves stock for every
@@ -262,6 +264,8 @@ export async function checkout(input: CheckoutInput) {
     throw err;
   }
 
+  const carrier = await assignCarrier(input.shippingCountry);
+
   const order = await prisma.order.create({
     data: {
       reference: generateReference(),
@@ -273,6 +277,8 @@ export async function checkout(input: CheckoutInput) {
       taxCents: pricing.taxCents,
       totalCents: pricing.totalCents,
       shippingAddress: input.shippingAddress,
+      shippingCountry: input.shippingCountry,
+      carrier,
       userId: input.userId,
       items: {
         create: pricing.lines.map((line) => ({

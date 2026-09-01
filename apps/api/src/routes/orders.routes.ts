@@ -32,6 +32,7 @@ const checkoutSchema = z.object({
     .min(1),
   paymentMethod: z.nativeEnum(PaymentMethod),
   shippingAddress: z.string().optional(),
+  shippingCountry: z.string().length(2).toUpperCase().optional(),
 });
 
 // "Customer" access per the design — no customer auth system exists yet

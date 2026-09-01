@@ -299,6 +299,23 @@ export async function deleteCartLead(leadId: number): Promise<void> {
 
 export interface PendingShipment extends Order {
   items: { id: number; variantId: number; quantity: number; unitPriceCents: number }[];
+  shippingCountry: string | null;
+  carrier: string | null;
+}
+
+// Populated once shipOrder() creates a real EasyPost (test mode) tracker —
+// null fields mean either the order hasn't shipped yet or EASYPOST_API_KEY
+// isn't configured (see lib/easypost.ts), never a failed live call.
+export interface InTransitShipment extends PendingShipment {
+  trackingNumber: string | null;
+  easypostTrackingUrl: string | null;
+  deliveryStatus: string | null;
+}
+
+export interface CarrierRule {
+  id: number;
+  country: string;
+  carrier: string;
 }
 
 export interface OrderDetailItem {
@@ -774,12 +791,34 @@ export async function fetchPendingShipments(): Promise<PendingShipment[]> {
   return data.orders;
 }
 
-export async function shipOrder(orderId: number, trackingNumber: string): Promise<Order> {
+export async function shipOrder(orderId: number, trackingNumber: string, carrier?: string): Promise<Order> {
   const data = await apiFetch(`/api/v1/shipping/${orderId}/ship`, {
     method: "PATCH",
-    body: JSON.stringify({ trackingNumber }),
+    body: JSON.stringify({ trackingNumber, carrier }),
   });
   return data.order;
+}
+
+export async function fetchInTransitShipments(): Promise<InTransitShipment[]> {
+  const data = await apiFetch("/api/v1/shipping/in-transit");
+  return data.orders;
+}
+
+export async function fetchCarrierRules(): Promise<CarrierRule[]> {
+  const data = await apiFetch("/api/v1/carrier-rules");
+  return data.rules;
+}
+
+export async function upsertCarrierRule(country: string, carrier: string): Promise<CarrierRule> {
+  const data = await apiFetch("/api/v1/carrier-rules", {
+    method: "POST",
+    body: JSON.stringify({ country, carrier }),
+  });
+  return data.rule;
+}
+
+export async function deleteCarrierRule(id: number): Promise<void> {
+  await apiFetch(`/api/v1/carrier-rules/${id}`, { method: "DELETE" });
 }
 
 export async function fetchPayments(): Promise<Payment[]> {
@@ -807,6 +846,7 @@ export interface StoreSettings {
   storeName: string;
   logoUrl: string | null;
   allowPartialRefunds: boolean;
+  defaultCarrier: string;
 }
 
 export async function fetchStoreSettings(): Promise<StoreSettings> {
@@ -826,6 +866,14 @@ export async function setAllowPartialRefunds(allowPartialRefunds: boolean): Prom
   const data = await apiFetch("/api/v1/settings", {
     method: "PATCH",
     body: JSON.stringify({ allowPartialRefunds }),
+  });
+  return data.settings;
+}
+
+export async function setDefaultCarrier(defaultCarrier: string): Promise<StoreSettings> {
+  const data = await apiFetch("/api/v1/settings", {
+    method: "PATCH",
+    body: JSON.stringify({ defaultCarrier }),
   });
   return data.settings;
 }

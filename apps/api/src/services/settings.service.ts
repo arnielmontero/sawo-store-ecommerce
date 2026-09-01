@@ -14,6 +14,7 @@ export async function updateStoreSettings(input: {
   storeName?: string;
   logoUrl?: string | null;
   allowPartialRefunds?: boolean;
+  defaultCarrier?: string;
 }) {
   return prisma.storeSettings.upsert({
     where: { id: 1 },
@@ -21,12 +22,14 @@ export async function updateStoreSettings(input: {
       storeName: input.storeName,
       logoUrl: input.logoUrl,
       allowPartialRefunds: input.allowPartialRefunds,
+      defaultCarrier: input.defaultCarrier,
     },
     create: {
       id: 1,
       storeName: input.storeName,
       logoUrl: input.logoUrl,
       allowPartialRefunds: input.allowPartialRefunds,
+      defaultCarrier: input.defaultCarrier,
     },
   });
 }

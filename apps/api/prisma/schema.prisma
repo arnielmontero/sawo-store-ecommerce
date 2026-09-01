@@ -302,8 +302,24 @@ model Order {
   currency      String @default("usd")
 
   shippingAddress String? @db.Text
+  // ISO 3166-1 alpha-2 country code (e.g. "US", "DE") — kept as a separate
+  // structured field alongside the free-text shippingAddress specifically
+  // so carrier assignment (see CarrierRule) can match on it directly rather
+  // than parsing the address blob.
+  shippingCountry String?
   isNewClient     Boolean @default(false)
   trackingNumber  String?
+  // Carrier code (e.g. "UPS", "DHL") — auto-assigned at checkout from
+  // CarrierRule based on shippingCountry, but a human can still override it
+  // per-order from the Deliveries page before shipping.
+  carrier         String?
+
+  // EasyPost tracker (test mode) created when the order is marked shipped —
+  // see shipping.service.ts. Null until then; deliveryStatus is refreshed
+  // from EasyPost's own tracker.status on each Deliveries page load.
+  easypostTrackerId  String?
+  easypostTrackingUrl String?
+  deliveryStatus     String?
 
   // Payment/idempotency — paymentAttemptCount increments on every call to
   // POST /payments/intent for this order, and the value at call time forms
@@ -670,5 +686,16 @@ model StoreSettings {
   // inventory, which is a real operational mode staff need to opt into
   // rather than have silently available. See payment.service.ts refundOrder.
   allowPartialRefunds Boolean  @default(false)
+  // Used when an order's shippingCountry has no matching CarrierRule.
+  defaultCarrier      String   @default("USPS")
   updatedAt           DateTime @updatedAt
+}
+
+// Country -> carrier assignment rules, editable from Configuration. Checked
+// in insertion order the first time a country has no matching rule falls
+// back to defaultCarrier below — see shipping.service.ts's assignCarrier.
+model CarrierRule {
+  id      Int    @id @default(autoincrement())
+  country String @unique // ISO 3166-1 alpha-2, e.g. "US"
+  carrier String // e.g. "UPS", "DHL", "FedEx", "USPS"
 }

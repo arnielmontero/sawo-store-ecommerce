@@ -340,6 +340,7 @@ interface OrderSeed {
   // show. Not a real Stripe object; fine for local seed data.
   stripePaymentIntentId?: string;
   shippingAddress?: string;
+  shippingCountry?: string;
   trackingNumber?: string;
   // Days before "now" this order was placed — spreads orders across a
   // realistic date range instead of everything landing on the seed run's
@@ -354,6 +355,23 @@ const ADDRESSES = [
   "77 Elm Court, Austin, TX 78701",
   "12 Maple Lane, Portland, OR 97201",
 ];
+
+// A handful of international addresses/countries mixed into the bulk seed
+// (see seedBulkOrders) so the carrier-assignment feature (see
+// carrier.service.ts) has more than one country to actually demonstrate —
+// without this every seeded order would be US, and CarrierRule's per-country
+// behavior would have nothing to show.
+const INTL_ADDRESSES: { address: string; country: string }[] = [
+  { address: "14 Rue de Rivoli, 75001 Paris", country: "FR" },
+  { address: "22 Königsallee, 40212 Düsseldorf", country: "DE" },
+  { address: "8 Bay Street, Toronto, ON M5J 2R8", country: "CA" },
+  { address: "5 Circular Quay, Sydney NSW 2000", country: "AU" },
+];
+
+// Every US ADDRESSES entry maps to "US" at the same index — kept as a
+// lookup rather than inlining "US" everywhere ADDRESSES is used, so the one
+// place that changes if a future ADDRESSES entry stops being domestic.
+const ADDRESS_COUNTRY = "US";
 
 const ORDERS: OrderSeed[] = [
   {
@@ -568,6 +586,8 @@ async function seedOrders(customers: { id: number }[], variantsBySku: Map<string
         stripePaymentIntentId: orderSeed.stripePaymentIntentId,
         paymentAttemptCount: orderSeed.stripePaymentIntentId ? 1 : 0,
         shippingAddress: orderSeed.shippingAddress,
+        shippingCountry: orderSeed.shippingAddress ? (orderSeed.shippingCountry ?? ADDRESS_COUNTRY) : undefined,
+        carrier: orderSeed.shippingAddress ? pickCarrier(orderSeed.shippingCountry ?? ADDRESS_COUNTRY) : undefined,
         trackingNumber: orderSeed.trackingNumber,
         createdAt,
         items: { create: items },
@@ -1908,6 +1928,17 @@ async function seedBulkOrders(customers: { id: number }[], variantsBySku: Map<st
     const hasPaymentIntent = finalStatus !== OrderStatus.PENDING && finalStatus !== OrderStatus.CANCELLED;
     const reference = `${BULK_REFERENCE_PREFIX}${String(i + 1).padStart(6, "0")}`;
 
+    // ~15% international, mixed in so CarrierRule's per-country assignment
+    // (see seedCarrierRules above) has real variety to show, not just US/USPS
+    // on every order.
+    const isIntl = rand() < 0.15;
+    const shippingAddress = isIntl
+      ? INTL_ADDRESSES[Math.floor(rand() * INTL_ADDRESSES.length)].address
+      : ADDRESSES[Math.floor(rand() * ADDRESSES.length)];
+    const shippingCountry = isIntl
+      ? INTL_ADDRESSES.find((a) => a.address === shippingAddress)!.country
+      : ADDRESS_COUNTRY;
+
     await prisma.order.create({
       data: {
         reference,
@@ -1921,7 +1952,9 @@ async function seedBulkOrders(customers: { id: number }[], variantsBySku: Map<st
         totalCents,
         stripePaymentIntentId: hasPaymentIntent ? `pi_bulk_${String(i + 1).padStart(6, "0")}` : undefined,
         paymentAttemptCount: hasPaymentIntent ? 1 : 0,
-        shippingAddress: ADDRESSES[Math.floor(rand() * ADDRESSES.length)],
+        shippingAddress,
+        shippingCountry,
+        carrier: pickCarrier(shippingCountry),
         trackingNumber:
           finalStatus === OrderStatus.SHIPPED ||
           finalStatus === OrderStatus.DELIVERED ||
@@ -1970,6 +2003,34 @@ async function seedSettings() {
     update: {},
     create: { id: 1, allowPartialRefunds: true },
   });
+}
+
+// Country -> carrier demo rules, matching CARRIER_RULE_MAP below so the
+// seeded orders' carrier assignments are consistent with what a fresh
+// checkout would compute via carrier.service.ts's assignCarrier.
+const CARRIER_RULE_MAP: Record<string, string> = {
+  US: "USPS",
+  CA: "UPS",
+  FR: "DHL",
+  DE: "DHL",
+  AU: "FedEx",
+};
+
+async function seedCarrierRules() {
+  const existingCount = await prisma.carrierRule.count();
+  if (existingCount > 0) return;
+
+  for (const [country, carrier] of Object.entries(CARRIER_RULE_MAP)) {
+    await prisma.carrierRule.create({ data: { country, carrier } });
+  }
+}
+
+// Mirrors carrier.service.ts's assignCarrier without the async settings
+// lookup — bulk seed generation needs this synchronously for hundreds of
+// rows, and the fallback here matches StoreSettings.defaultCarrier's own
+// default ("USPS") so the two never disagree.
+function pickCarrier(country: string) {
+  return CARRIER_RULE_MAP[country] ?? "USPS";
 }
 
 // Reconstructs StockAdjustment rows for every order created before the
@@ -2147,6 +2208,7 @@ async function backfillStockAdjustmentHistory() {
 export async function runSeed(): Promise<string> {
   await seedAdmins();
   await seedSettings();
+  await seedCarrierRules();
   const customers = await seedCustomers();
   const bulkCustomers = await seedBulkCustomers();
   await seedCustomerProfileDetails(customers);

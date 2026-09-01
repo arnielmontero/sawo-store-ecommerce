@@ -13,6 +13,10 @@ const envSchema = z.object({
   REFRESH_TOKEN_SECRET: z.string().min(16, "REFRESH_TOKEN_SECRET must be at least 16 characters"),
   STRIPE_SECRET_KEY: z.string().min(1, "STRIPE_SECRET_KEY is required"),
   STRIPE_WEBHOOK_SECRET: z.string().min(1, "STRIPE_WEBHOOK_SECRET is required"),
+  // EasyPost (test mode) — carrier tracking, see lib/easypost.ts. Optional:
+  // unset in dev leaves tracking creation a no-op (see shipping.service.ts)
+  // rather than crashing the whole server over a nice-to-have integration.
+  EASYPOST_API_KEY: z.string().optional(),
 });
 
 const parsed = envSchema.safeParse(process.env);
