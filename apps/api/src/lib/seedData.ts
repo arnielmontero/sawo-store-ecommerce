@@ -1088,13 +1088,16 @@ async function seedReturnRequestExamples(customers: { id: number }[], variantsBy
   }
 }
 
-// Fills in full profile detail (name/phone/address) for a handful of the
-// curated customers — demonstrates the Customer page's "full customer
-// information" section with real data rather than every customer showing
-// blank fields. Most seeded customers stay email-only, matching how a real
-// store's contact info gets filled in gradually by staff over time, not
-// all at once at signup (there's no storefront signup flow here at all —
-// see checkout()).
+// Fills in full profile detail (name/phone/address) for every one of the
+// CUSTOMER_COUNT curated customers (the ones with hand-crafted named
+// orders, indices 0-11) — demonstrates the Customer page's "full customer
+// information" section fully populated rather than mostly blank. The 168
+// BULK_CUSTOMER_COUNT customers stay email-only on purpose: they exist to
+// simulate scale/volume (see seedBulkOrders), not to be individually
+// detailed, same reasoning already applied to them everywhere else in this
+// file (no hand-crafted orders, no named review authors, etc). A real
+// store's contact info is filled in gradually by staff over time anyway —
+// there's no storefront signup flow here at all (see checkout()).
 async function seedCustomerProfileDetails(customers: { id: number }[]) {
   const profiles = [
     {
@@ -1119,13 +1122,106 @@ async function seedCustomerProfileDetails(customers: { id: number }[]) {
       country: "United States",
     },
     {
-      index: 4,
-      name: "Ingrid Petersen",
-      phone: "+1 512-555-0177",
+      index: 2,
+      name: "Priya Nair",
+      phone: "+1 206-555-0163",
+      addressLine1: "1600 Pine Ave",
+      city: "Seattle",
+      state: "WA",
+      postalCode: "98101",
+      country: "United States",
+    },
+    {
+      index: 3,
+      name: "Owen Brooks",
+      phone: "+1 512-555-0119",
       addressLine1: "77 Elm Court",
       city: "Austin",
       state: "TX",
       postalCode: "78701",
+      country: "United States",
+    },
+    {
+      index: 4,
+      name: "Ingrid Petersen",
+      phone: "+1 503-555-0177",
+      addressLine1: "12 Maple Lane",
+      city: "Portland",
+      state: "OR",
+      postalCode: "97201",
+      country: "United States",
+    },
+    {
+      index: 5,
+      name: "Felix Hartmann",
+      phone: "+1 217-555-0184",
+      addressLine1: "310 Baker Street",
+      addressLine2: "Apt 2",
+      city: "Springfield",
+      state: "IL",
+      postalCode: "62704",
+      country: "United States",
+    },
+    {
+      index: 6,
+      name: "Greta Lindqvist",
+      phone: "+1 305-555-0146",
+      addressLine1: "9 Ocean Drive",
+      city: "Miami",
+      state: "FL",
+      postalCode: "33139",
+      country: "United States",
+    },
+    {
+      index: 7,
+      name: "Victor Nakamura",
+      phone: "+1 206-555-0129",
+      addressLine1: "2200 Pine Ave",
+      addressLine2: "Suite 100",
+      city: "Seattle",
+      state: "WA",
+      postalCode: "98101",
+      country: "United States",
+    },
+    {
+      index: 8,
+      name: "Naomi Cole",
+      phone: "+1 512-555-0155",
+      addressLine1: "150 Elm Court",
+      city: "Austin",
+      state: "TX",
+      postalCode: "78702",
+      country: "United States",
+    },
+    {
+      index: 9,
+      name: "Tomas Berg",
+      phone: "+1 503-555-0192",
+      addressLine1: "45 Maple Lane",
+      city: "Portland",
+      state: "OR",
+      postalCode: "97201",
+      country: "United States",
+    },
+    {
+      index: 10,
+      name: "Elena Vasquez",
+      phone: "+1 217-555-0171",
+      addressLine1: "88 Baker Street",
+      city: "Springfield",
+      state: "IL",
+      postalCode: "62701",
+      country: "United States",
+    },
+    {
+      index: 11,
+      name: "Chris Delgado",
+      phone: "+1 305-555-0138",
+      addressLine1: "300 Ocean Drive",
+      addressLine2: "Unit 12",
+      city: "Miami",
+      state: "FL",
+      postalCode: "33139",
       country: "United States",
     },
   ];
@@ -1694,6 +1790,47 @@ async function seedSettings() {
 // resultingQuantity at every step — the only way to reconstruct a real
 // running total after the fact, since the adjustments themselves were never
 // recorded when they happened.
+// Card brand/last4/paymentStatus are normally only ever written by a real
+// Stripe webhook (see payment.service.ts's recordCardMetadata) — seeded
+// orders never go through Stripe, so without this they'd always show blank
+// on the Customer page's Transactions table. Backfills plausible demo
+// values (same "clearly fake, matches the rest of this seed file" spirit
+// as SAW-BULK- references) onto every CARD-paid order that reached a real
+// payment state, deterministic via the same mulberry32 PRNG the bulk order
+// generator already uses so a reseed produces identical results.
+const DEMO_CARD_BRANDS = ["visa", "mastercard", "amex", "discover"] as const;
+const CARD_PAID_STATUSES: OrderStatus[] = [
+  OrderStatus.PAID,
+  OrderStatus.SHIPPED,
+  OrderStatus.DELIVERED,
+  OrderStatus.REFUNDED,
+  OrderStatus.RETURNED,
+  OrderStatus.PARTIALLY_REFUNDED,
+];
+
+async function backfillCardMetadata() {
+  const orders = await prisma.order.findMany({
+    where: {
+      paymentMethod: PaymentMethod.CARD,
+      status: { in: CARD_PAID_STATUSES },
+      stripePaymentIntentId: { not: null },
+      cardBrand: null,
+    },
+    select: { id: true },
+  });
+  if (orders.length === 0) return;
+
+  const rand = mulberry32(20260901);
+  for (const order of orders) {
+    const brand = DEMO_CARD_BRANDS[Math.floor(rand() * DEMO_CARD_BRANDS.length)];
+    const last4 = String(Math.floor(rand() * 10000)).padStart(4, "0");
+    await prisma.order.update({
+      where: { id: order.id },
+      data: { cardBrand: brand, cardLast4: last4, paymentStatus: "succeeded" },
+    });
+  }
+}
+
 async function backfillStockAdjustmentHistory() {
   const already = await prisma.stockAdjustment.findFirst({ where: { note: "Backfilled from order history" } });
   if (already) return;
@@ -1834,6 +1971,7 @@ export async function runSeed(): Promise<string> {
   // review.service.ts's logReview), so there needs to be purchase history
   // to attach them to first.
   await seedReviewAndQuestionExamples();
+  await backfillCardMetadata();
   await backfillStockAdjustmentHistory();
 
   const productCount = PRODUCTS.length;
@@ -1846,7 +1984,8 @@ export async function runSeed(): Promise<string> {
     `(${BULK_ORDER_COUNT} bulk-generated over the past 12 months, 3 hand-crafted refund examples, 3 return-request ` +
     `examples covering pending/approved/rejected, and ${ORDERS.length} curated demo orders), 4 order notes, ` +
     `13 product reviews spanning the catalog (published immediately, mixed ratings, one obvious spam ` +
-    `example demonstrating the delete flow), 6 product questions covering unanswered/answered, 3 customers ` +
-    `with full profile detail, 1 cart-interest lead example, and enabled partial refunds in store settings.`
+    `example demonstrating the delete flow), 6 product questions covering unanswered/answered, ${CUSTOMER_COUNT} ` +
+    `customers with full profile detail (name/phone/address), demo card metadata backfilled onto every ` +
+    `card-paid completed order, 1 cart-interest lead example, and enabled partial refunds in store settings.`
   );
 }
