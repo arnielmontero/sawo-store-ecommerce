@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useParams } from "next/navigation";
+import { useParams, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { fetchOrder, updateOrderStatus, refundPayment, addOrderNote, type OrderDetail, type OrderStatus } from "@/lib/api";
 import { formatCents, formatPaymentMethod } from "@/lib/format";
@@ -15,6 +15,12 @@ import { DeliveryProgress } from "@/components/DeliveryProgress";
 
 export default function OrderDetailPage() {
   const params = useParams<{ id: string }>();
+  const searchParams = useSearchParams();
+  // Arrived at from a context that only wants to review the order (e.g. the
+  // Payments list, linking to a transaction's order for reference) — hides
+  // status-transition/refund/note-editing controls so it reads as a summary,
+  // not an invitation to change order state from what should be a lookup.
+  const readOnly = searchParams.get("readonly") === "1";
   const { user } = useAuth();
   const { settings } = useStoreSettings();
   const [order, setOrder] = useState<OrderDetail | null>(null);
@@ -78,8 +84,8 @@ export default function OrderDetailPage() {
   if (error) return <p className="text-sm text-brand-600">{error}</p>;
   if (!order) return null;
 
-  const canStaffAct = user?.role === "ADMIN" || user?.role === "FULFILLMENT_STAFF";
-  const canReviewReturns = user?.role === "ADMIN";
+  const canStaffAct = !readOnly && (user?.role === "ADMIN" || user?.role === "FULFILLMENT_STAFF");
+  const canReviewReturns = !readOnly && user?.role === "ADMIN";
 
   return (
     <div>
@@ -309,23 +315,27 @@ export default function OrderDetailPage() {
           <p className="mt-0.5 text-xs text-ink-400">Internal only — never shown to the customer.</p>
         </div>
         <div className="px-5 py-4">
-          <textarea
-            value={noteBody}
-            onChange={(e) => setNoteBody(e.target.value.slice(0, 2000))}
-            placeholder="Leave a note for other staff (e.g. customer called, wants address changed)..."
-            rows={2}
-            className="w-full rounded-md border border-ink-100 px-3 py-2 text-sm outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
-          />
-          <div className="mt-2 flex items-center justify-between">
-            {noteError ? <p className="text-sm text-brand-600">{noteError}</p> : <span />}
-            <button
-              onClick={handleAddNote}
-              disabled={noteSaving || !noteBody.trim()}
-              className="rounded-md bg-brand-500 px-4 py-1.5 text-sm font-medium text-white hover:bg-brand-600 disabled:opacity-50"
-            >
-              {noteSaving ? "Adding..." : "Add note"}
-            </button>
-          </div>
+          {!readOnly && (
+            <>
+              <textarea
+                value={noteBody}
+                onChange={(e) => setNoteBody(e.target.value.slice(0, 2000))}
+                placeholder="Leave a note for other staff (e.g. customer called, wants address changed)..."
+                rows={2}
+                className="w-full rounded-md border border-ink-100 px-3 py-2 text-sm outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
+              />
+              <div className="mt-2 flex items-center justify-between">
+                {noteError ? <p className="text-sm text-brand-600">{noteError}</p> : <span />}
+                <button
+                  onClick={handleAddNote}
+                  disabled={noteSaving || !noteBody.trim()}
+                  className="rounded-md bg-brand-500 px-4 py-1.5 text-sm font-medium text-white hover:bg-brand-600 disabled:opacity-50"
+                >
+                  {noteSaving ? "Adding..." : "Add note"}
+                </button>
+              </div>
+            </>
+          )}
 
           {order.notes.length > 0 && (
             <ul className="mt-4 space-y-3 border-t border-ink-100 pt-4">

@@ -134,7 +134,13 @@ export default function PaymentsPage() {
                 {payments.map((payment) => (
                   <tr key={payment.id} className="border-b border-ink-100 last:border-0 hover:bg-gray-50">
                     <td className="px-5 py-3 font-medium text-ink-900">
-                      <Link href={`/orders/${payment.id}`} className="hover:text-brand-600 hover:underline">
+                      <Link
+                        href={`/orders/${payment.id}?readonly=1`}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="hover:text-brand-600 hover:underline"
+                        title="Open order for review in a new tab"
+                      >
                         {payment.reference}
                       </Link>
                     </td>
