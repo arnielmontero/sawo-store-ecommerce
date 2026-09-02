@@ -1,5 +1,6 @@
 import { NotificationType } from "@prisma/client";
 import { prisma } from "../lib/prisma";
+import { PENDING_STALE_HOURS, PAID_STALE_HOURS, SHIPPED_STALE_DAYS } from "../lib/staleOrderThresholds";
 
 // Creates a notification unless an unresolved one with the same (type,
 // dedupeKey) already exists — the actual de-duplication guarantee this
@@ -125,18 +126,20 @@ export async function checkLowStockNotification(
 // No single moment makes an order "24 hours old" the way a return request
 // or a sale is a discrete event — so this runs as a live check when the
 // inbox is opened (see notifications.routes.ts) instead of being triggered
-// from order.service.ts. Cheap: only ever scans orders already in PENDING
-// or SHIPPED, which is a small slice of the table.
-const PENDING_STALE_HOURS = 24;
-const SHIPPED_STALE_DAYS = 7;
-
+// from order.service.ts. Cheap: only ever scans orders already in PENDING,
+// PAID, or SHIPPED, which is a small slice of the table.
 export async function checkForStaleOrders() {
   const pendingCutoff = new Date(Date.now() - PENDING_STALE_HOURS * 60 * 60 * 1000);
+  const paidCutoff = new Date(Date.now() - PAID_STALE_HOURS * 60 * 60 * 1000);
   const shippedCutoff = new Date(Date.now() - SHIPPED_STALE_DAYS * 24 * 60 * 60 * 1000);
 
   const stalePending = await prisma.order.findMany({
     where: { status: "PENDING", createdAt: { lte: pendingCutoff } },
     select: { id: true, reference: true, createdAt: true },
+  });
+  const stalePaid = await prisma.order.findMany({
+    where: { status: "PAID", paidAt: { lte: paidCutoff } },
+    select: { id: true, reference: true, paidAt: true },
   });
   const staleShipped = await prisma.order.findMany({
     where: { status: "SHIPPED", updatedAt: { lte: shippedCutoff } },
@@ -152,6 +155,15 @@ export async function checkForStaleOrders() {
       link: `/orders/${order.id}`,
     });
   }
+  for (const order of stalePaid) {
+    await upsertNotification({
+      type: NotificationType.ORDER_STALE,
+      dedupeKey: `order-${order.id}-paid`,
+      title: `Order paid, not yet shipped — ${order.reference}`,
+      body: `Paid over ${PAID_STALE_HOURS} hours ago and still hasn't shipped.`,
+      link: `/deliveries`,
+    });
+  }
   for (const order of staleShipped) {
     await upsertNotification({
       type: NotificationType.ORDER_STALE,
@@ -164,10 +176,12 @@ export async function checkForStaleOrders() {
 }
 
 // Called wherever an order's status actually changes — resolves any stale
-// notification for it once it's no longer sitting in PENDING/SHIPPED, so a
-// paid or delivered order doesn't keep showing a stale alert.
+// notification for it once it's no longer sitting in PENDING/PAID/SHIPPED,
+// so an order that progressed past a stale stage doesn't keep showing an
+// alert for it.
 export async function resolveStaleOrderNotifications(orderId: number) {
   await resolveNotifications(NotificationType.ORDER_STALE, `order-${orderId}-pending`);
+  await resolveNotifications(NotificationType.ORDER_STALE, `order-${orderId}-paid`);
   await resolveNotifications(NotificationType.ORDER_STALE, `order-${orderId}-shipped`);
 }
 

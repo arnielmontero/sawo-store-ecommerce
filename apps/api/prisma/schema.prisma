@@ -363,6 +363,12 @@ model Order {
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+  // First time this order's status transitioned to PAID — set once inside
+  // setOrderStatus and never overwritten afterward. Deliberately distinct
+  // from updatedAt, which bumps on ANY field write (a staff note, a refund)
+  // and would silently reset a "how long paid but unshipped" clock if used
+  // for that instead — see shipping.service.ts's overdue calculation.
+  paidAt    DateTime?
 
   statusHistory  OrderStatusHistory[]
   refunds        RefundRecord[]
@@ -371,6 +377,7 @@ model Order {
 
   @@index([status])
   @@index([userId])
+  @@index([status, paidAt])
 }
 
 // One row per refund event (full or partial) — the audit trail for "how

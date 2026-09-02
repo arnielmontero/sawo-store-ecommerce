@@ -24,10 +24,7 @@ import {
 import { useStoreSettings } from "@/lib/store-settings-context";
 import { useAuth } from "@/lib/auth-context";
 import { COUNTRIES } from "@/lib/countries";
-
-// Well-known carrier codes EasyPost recognizes for tracker/rate matching —
-// not exhaustive, just the common ones staff are likely to actually assign.
-const CARRIER_OPTIONS = ["USPS", "UPS", "FedEx", "DHL"];
+import { CARRIER_OPTIONS } from "@/lib/constants";
 
 const PAYMENT_METHOD_OPTIONS: { value: PaymentMethod; label: string }[] = [
   { value: "CARD", label: "Card" },
@@ -67,7 +64,7 @@ export default function ConfigurationPage() {
   const [rulesLoading, setRulesLoading] = useState(true);
   const [defaultCarrierSaving, setDefaultCarrierSaving] = useState(false);
   const [ruleCountry, setRuleCountry] = useState(COUNTRIES[0].code);
-  const [ruleCarrier, setRuleCarrier] = useState(CARRIER_OPTIONS[0]);
+  const [ruleCarrier, setRuleCarrier] = useState<string>(CARRIER_OPTIONS[0]);
   const [ruleSaving, setRuleSaving] = useState(false);
   const [ruleError, setRuleError] = useState<string | null>(null);
 

@@ -1,28 +1,211 @@
-import { OrderStatus } from "@prisma/client";
+import { OrderStatus, Prisma } from "@prisma/client";
 import { prisma } from "../lib/prisma";
 import { getEasypost } from "../lib/easypost";
 import { HttpError } from "../middleware/errorHandler";
 import { updateOrderStatus } from "./order.service";
+import { toCsv } from "../lib/csv";
+import { PAID_STALE_HOURS, SHIPPED_STALE_DAYS } from "../lib/staleOrderThresholds";
 
-// Orders that are paid but not yet shipped — the fulfillment queue.
-export async function listPendingShipments() {
-  return prisma.order.findMany({
-    where: { status: OrderStatus.PAID },
-    include: { items: true },
-    orderBy: { createdAt: "asc" },
-  });
+const PAGE_SIZE = 20;
+
+export type ShipmentTab = "pending" | "in-transit" | "history";
+export type ShipmentSortField = "createdAt" | "paidAt" | "updatedAt" | "totalCents";
+export type OverdueReason = "paid_too_long" | "shipped_too_long" | null;
+
+export interface ListShipmentsFilters {
+  search?: string;
+  // Multiple values = OR'd together, matching the multi-select checkbox
+  // dropdowns in the admin UI (same convention as payment.service.ts).
+  carrier?: string[];
+  country?: string[];
+  sortBy?: ShipmentSortField;
+  sortDir?: "asc" | "desc";
+  page?: number;
 }
 
-// Orders already shipped (or delivered) — the live-tracking view. Excludes
-// terminal states unrelated to delivery (CANCELLED/REFUNDED before ever
-// shipping) since those never got a tracker.
-export async function listInTransitShipments() {
-  return prisma.order.findMany({
-    where: { status: { in: [OrderStatus.SHIPPED, OrderStatus.DELIVERED] }, easypostTrackerId: { not: null } },
-    include: { items: true },
-    orderBy: { createdAt: "desc" },
-  });
+// Tab -> base where clause. Shared by listShipments and exportShipmentsCsv
+// so an export always matches exactly what's on screen, minus pagination —
+// same pattern as order.service.ts's buildOrdersWhere.
+function buildShipmentsWhere(tab: ShipmentTab, filters: ListShipmentsFilters): Prisma.OrderWhereInput {
+  const base: Prisma.OrderWhereInput =
+    tab === "pending"
+      ? { status: OrderStatus.PAID }
+      : tab === "in-transit"
+      ? { status: { in: [OrderStatus.SHIPPED, OrderStatus.DELIVERED] }, easypostTrackerId: { not: null } }
+      : { status: { in: [OrderStatus.DELIVERED, OrderStatus.RETURNED] } };
+
+  return {
+    ...base,
+    ...(filters.carrier && filters.carrier.length > 0 ? { carrier: { in: filters.carrier } } : {}),
+    ...(filters.country && filters.country.length > 0 ? { shippingCountry: { in: filters.country } } : {}),
+    ...(filters.search
+      ? {
+          OR: [
+            { reference: { contains: filters.search } },
+            { trackingNumber: { contains: filters.search } },
+            { user: { email: { contains: filters.search } } },
+          ],
+        }
+      : {}),
+  };
 }
+
+// Overdue is computed at query time from paidAt/updatedAt, not stored — a
+// cheap comparison against the shared thresholds (see staleOrderThresholds
+// .ts), kept in lockstep with the same thresholds the notification inbox
+// uses so the two can never disagree about what counts as overdue.
+function computeOverdue(
+  tab: ShipmentTab,
+  order: { status: OrderStatus; paidAt: Date | null; updatedAt: Date }
+): { isOverdue: boolean; overdueReason: OverdueReason } {
+  if (tab === "pending" && order.paidAt) {
+    const hoursSincePaid = (Date.now() - order.paidAt.getTime()) / (1000 * 60 * 60);
+    if (hoursSincePaid > PAID_STALE_HOURS) return { isOverdue: true, overdueReason: "paid_too_long" };
+  }
+  if (tab === "in-transit" && order.status === OrderStatus.SHIPPED) {
+    const daysSinceUpdate = (Date.now() - order.updatedAt.getTime()) / (1000 * 60 * 60 * 24);
+    if (daysSinceUpdate > SHIPPED_STALE_DAYS) return { isOverdue: true, overdueReason: "shipped_too_long" };
+  }
+  return { isOverdue: false, overdueReason: null };
+}
+
+const SHIPMENT_SELECT = {
+  id: true,
+  reference: true,
+  status: true,
+  totalCents: true,
+  currency: true,
+  createdAt: true,
+  updatedAt: true,
+  paidAt: true,
+  shippingCountry: true,
+  carrier: true,
+  trackingNumber: true,
+  easypostTrackingUrl: true,
+  deliveryStatus: true,
+  items: { select: { id: true, variantId: true, quantity: true, unitPriceCents: true } },
+} satisfies Prisma.OrderSelect;
+
+// Powers all three Deliveries tabs (Pending/In-Transit/History) through one
+// shared query shape — search/carrier/country/sort/pagination all behave
+// identically across tabs, only the base "which orders belong on this tab"
+// where-clause differs. Mirrors payment.service.ts's listPayments.
+export async function listShipments(tab: ShipmentTab, filters: ListShipmentsFilters = {}) {
+  const page = filters.page && filters.page > 0 ? filters.page : 1;
+  // Pending defaults to oldest-paid-first (matches the original
+  // listPendingShipments's createdAt-asc fulfillment-queue ordering); the
+  // other tabs default to newest-first.
+  const sortBy = filters.sortBy ?? (tab === "pending" ? "paidAt" : "createdAt");
+  const sortDir = filters.sortDir ?? (tab === "pending" ? "asc" : "desc");
+  const where = buildShipmentsWhere(tab, filters);
+
+  const [rows, total] = await Promise.all([
+    prisma.order.findMany({
+      where,
+      select: SHIPMENT_SELECT,
+      orderBy: { [sortBy]: sortDir },
+      skip: (page - 1) * PAGE_SIZE,
+      take: PAGE_SIZE,
+    }),
+    prisma.order.count({ where }),
+  ]);
+
+  const shipments = rows.map((order) => ({ ...order, ...computeOverdue(tab, order) }));
+
+  return {
+    shipments,
+    pagination: { page, pageSize: PAGE_SIZE, total, totalPages: Math.max(1, Math.ceil(total / PAGE_SIZE)) },
+  };
+}
+
+// ── CSV export ────────────────────────────────────────────────────────
+
+const SHIPMENT_CSV_HEADERS = [
+  "Reference",
+  "Status",
+  "Country",
+  "Carrier",
+  "Tracking Number",
+  "Total",
+  "Currency",
+  "Ordered At",
+  "Paid At",
+  "Delivery Status",
+  "Overdue",
+];
+
+// Reuses buildShipmentsWhere so an export always matches exactly what the
+// same tab/filters currently show on screen, minus pagination — same
+// convention as order.service.ts's exportOrdersCsv.
+export async function exportShipmentsCsv(tab: ShipmentTab, filters: ListShipmentsFilters = {}): Promise<string> {
+  const where = buildShipmentsWhere(tab, filters);
+  const rows = await prisma.order.findMany({ where, select: SHIPMENT_SELECT, orderBy: { createdAt: "desc" } });
+
+  const csvRows = rows.map((order) => {
+    const { isOverdue } = computeOverdue(tab, order);
+    return [
+      order.reference,
+      order.status,
+      order.shippingCountry ?? "",
+      order.carrier ?? "",
+      order.trackingNumber ?? "",
+      (order.totalCents / 100).toFixed(2),
+      order.currency,
+      order.createdAt.toISOString(),
+      order.paidAt?.toISOString() ?? "",
+      order.deliveryStatus ?? "",
+      isOverdue ? "Yes" : "No",
+    ];
+  });
+
+  return toCsv(SHIPMENT_CSV_HEADERS, csvRows);
+}
+
+// ── Summary stats ────────────────────────────────────────────────────
+
+// Powers the Deliveries stats bar. Deliberately NOT derived from
+// listShipments's paginated rows — like order.service.ts's
+// getOrderStatistics, these counts must reflect the true totals regardless
+// of whatever page/filter is currently open, or they'd be misleading.
+export async function getShipmentStatistics() {
+  const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+
+  const [pendingCount, inTransitCount, deliveredThisWeekCount, shipTimeSample] = await Promise.all([
+    prisma.order.count({ where: { status: OrderStatus.PAID } }),
+    prisma.order.count({
+      where: { status: { in: [OrderStatus.SHIPPED, OrderStatus.DELIVERED] }, easypostTrackerId: { not: null } },
+    }),
+    prisma.order.count({ where: { status: OrderStatus.DELIVERED, updatedAt: { gte: sevenDaysAgo } } }),
+    // Avg paid->shipped time, computed in JS from a bounded sample rather
+    // than a raw SQL AVG(TIMESTAMPDIFF(...)) — Prisma has no portable
+    // "average of a date difference" aggregate, and a rough average over a
+    // capped sample is enough for a stats-bar figure that doesn't need to
+    // be exact to the second.
+    prisma.order.findMany({
+      where: {
+        paidAt: { not: null },
+        status: { in: [OrderStatus.SHIPPED, OrderStatus.DELIVERED, OrderStatus.RETURNED] },
+      },
+      select: {
+        paidAt: true,
+        statusHistory: { where: { status: OrderStatus.SHIPPED }, select: { changedAt: true }, take: 1 },
+      },
+      take: 500,
+    }),
+  ]);
+
+  const shipTimesMs = shipTimeSample
+    .filter((o) => o.paidAt && o.statusHistory[0])
+    .map((o) => o.statusHistory[0].changedAt.getTime() - o.paidAt!.getTime());
+  const avgPaidToShipHours =
+    shipTimesMs.length > 0
+      ? shipTimesMs.reduce((sum, ms) => sum + ms, 0) / shipTimesMs.length / (1000 * 60 * 60)
+      : null;
+
+  return { pendingCount, inTransitCount, deliveredThisWeekCount, avgPaidToShipHours };
+}
+
+// ── EasyPost tracker mutations (unchanged behavior) ────────────────────
 
 // EasyPost test-mode trackers deterministically walk through pre_transit ->
 // in_transit -> out_for_delivery -> delivered based on the tracking_code's
@@ -105,9 +288,8 @@ export async function refreshDeliveryStatus(orderId: number) {
 }
 
 export async function refreshAllDeliveryStatuses() {
-  const shipments = await listInTransitShipments();
+  const { shipments } = await listShipments("in-transit", {});
   for (const order of shipments) {
     await refreshDeliveryStatus(order.id);
   }
-  return listInTransitShipments();
 }

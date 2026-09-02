@@ -359,12 +359,22 @@ export async function updateOrderStatus(orderId: number, nextStatus: OrderStatus
 // item quantities actually returned), not the blanket "restock every item in
 // full" that updateOrderStatus would otherwise apply for REFUNDED.
 export async function setOrderStatus(orderId: number, nextStatus: OrderStatus) {
-  if (!canTransition((await prisma.order.findUniqueOrThrow({ where: { id: orderId } })).status, nextStatus)) {
+  const current = await prisma.order.findUniqueOrThrow({ where: { id: orderId } });
+  if (!canTransition(current.status, nextStatus)) {
     throw new HttpError(409, `Cannot transition order to ${nextStatus}`);
   }
   await prisma.order.update({
     where: { id: orderId },
-    data: { status: nextStatus, statusHistory: { create: { status: nextStatus } } },
+    data: {
+      status: nextStatus,
+      statusHistory: { create: { status: nextStatus } },
+      // Set once, the first time an order reaches PAID — never overwritten
+      // afterward. Distinct from updatedAt (bumps on any field write), so
+      // it's the only reliable "how long has this been paid" signal; see
+      // shipping.service.ts's overdue calculation for why that distinction
+      // matters.
+      ...(nextStatus === OrderStatus.PAID && !current.paidAt ? { paidAt: new Date() } : {}),
+    },
   });
   // The order just left whatever status it was in — any "still PENDING
   // after 24h" / "still SHIPPED after 7d" alert for it no longer applies,

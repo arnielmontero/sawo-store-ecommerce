@@ -297,19 +297,42 @@ export async function deleteCartLead(leadId: number): Promise<void> {
   await apiFetch(`/api/v1/customers/cart-leads/${leadId}`, { method: "DELETE" });
 }
 
-export interface PendingShipment extends Order {
-  items: { id: number; variantId: number; quantity: number; unitPriceCents: number }[];
+export type ShipmentTab = "pending" | "in-transit" | "history";
+export type ShipmentSortField = "createdAt" | "paidAt" | "updatedAt" | "totalCents";
+export type OverdueReason = "paid_too_long" | "shipped_too_long" | null;
+
+// Populated tracking/delivery fields mean either the order hasn't shipped
+// yet, or EASYPOST_API_KEY isn't configured (see lib/easypost.ts) — never a
+// failed live call.
+export interface Shipment {
+  id: number;
+  reference: string;
+  status: OrderStatus;
+  totalCents: number;
+  currency: string;
+  createdAt: string;
+  updatedAt: string;
+  paidAt: string | null;
   shippingCountry: string | null;
   carrier: string | null;
-}
-
-// Populated once shipOrder() creates a real EasyPost (test mode) tracker —
-// null fields mean either the order hasn't shipped yet or EASYPOST_API_KEY
-// isn't configured (see lib/easypost.ts), never a failed live call.
-export interface InTransitShipment extends PendingShipment {
   trackingNumber: string | null;
   easypostTrackingUrl: string | null;
   deliveryStatus: string | null;
+  items: { id: number; variantId: number; quantity: number; unitPriceCents: number }[];
+  isOverdue: boolean;
+  overdueReason: OverdueReason;
+}
+
+export interface ShipmentsPage {
+  shipments: Shipment[];
+  pagination: { page: number; pageSize: number; total: number; totalPages: number };
+}
+
+export interface ShipmentStatistics {
+  pendingCount: number;
+  inTransitCount: number;
+  deliveredThisWeekCount: number;
+  avgPaidToShipHours: number | null;
 }
 
 export interface CarrierRule {
@@ -803,9 +826,49 @@ export async function fetchCustomer(id: number): Promise<CustomerDetail> {
   return data.customer;
 }
 
-export async function fetchPendingShipments(): Promise<PendingShipment[]> {
-  const data = await apiFetch("/api/v1/shipping/pending");
-  return data.orders;
+export async function fetchShipments(
+  tab: ShipmentTab,
+  params: {
+    search?: string;
+    carrier?: string[];
+    country?: string[];
+    sortBy?: ShipmentSortField;
+    sortDir?: SortDir;
+    page?: number;
+  } = {}
+): Promise<ShipmentsPage> {
+  const query = new URLSearchParams({ tab });
+  if (params.search) query.set("search", params.search);
+  for (const c of params.carrier ?? []) query.append("carrier", c);
+  for (const c of params.country ?? []) query.append("country", c);
+  if (params.sortBy) query.set("sortBy", params.sortBy);
+  if (params.sortDir) query.set("sortDir", params.sortDir);
+  if (params.page) query.set("page", String(params.page));
+  return apiFetch(`/api/v1/shipping?${query.toString()}`);
+}
+
+// Exports whatever the given Deliveries tab is currently filtered to
+// (search/carrier/country) — omit filter params for the full unfiltered
+// export of that tab.
+export async function exportShipmentsCsvUrl(
+  tab: ShipmentTab,
+  params: { search?: string; carrier?: string[]; country?: string[] } = {}
+): Promise<string> {
+  const query = new URLSearchParams({ tab });
+  if (params.search) query.set("search", params.search);
+  for (const c of params.carrier ?? []) query.append("carrier", c);
+  for (const c of params.country ?? []) query.append("country", c);
+  const res = await fetch(`${API_URL}/api/v1/shipping/export?${query.toString()}`, {
+    credentials: "include",
+    headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : {},
+  });
+  if (!res.ok) throw new ApiError(res.status, "Failed to export deliveries");
+  const blob = await res.blob();
+  return URL.createObjectURL(blob);
+}
+
+export async function fetchShipmentStatistics(): Promise<ShipmentStatistics> {
+  return apiFetch("/api/v1/shipping/statistics");
 }
 
 export async function shipOrder(orderId: number, trackingNumber: string, carrier?: string): Promise<Order> {
@@ -814,11 +877,6 @@ export async function shipOrder(orderId: number, trackingNumber: string, carrier
     body: JSON.stringify({ trackingNumber, carrier }),
   });
   return data.order;
-}
-
-export async function fetchInTransitShipments(): Promise<InTransitShipment[]> {
-  const data = await apiFetch("/api/v1/shipping/in-transit");
-  return data.orders;
 }
 
 export async function fetchCarrierRules(): Promise<CarrierRule[]> {
