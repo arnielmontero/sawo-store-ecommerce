@@ -688,15 +688,20 @@ async function seedOrders(customers: { id: number }[], variantsBySku: Map<string
         shippingCountry: orderSeed.shippingAddress ? (orderSeed.shippingCountry ?? ADDRESS_COUNTRY) : undefined,
         carrier: orderSeed.shippingAddress ? pickCarrier(orderSeed.shippingCountry ?? ADDRESS_COUNTRY) : undefined,
         trackingNumber: orderSeed.trackingNumber,
+        deliveryStatus: orderSeed.trackingNumber ? pickDeliveryStatus(orderSeed.status) : undefined,
+        easypostTrackingUrl: orderSeed.trackingNumber
+          ? `https://track.easypost.com/${orderSeed.reference.toLowerCase()}`
+          : undefined,
         createdAt,
         items: { create: items },
-        // Seed orders are created directly at their final status rather
-        // than progressing through checkout()/updateOrderStatus() like a
-        // real order would, so there's no real per-transition history to
-        // record — this single entry (dated at createdAt, the closest
-        // honest approximation) just keeps the Timeline UI from showing
-        // "No status history recorded" for every demo order.
-        statusHistory: { create: { status: orderSeed.status, changedAt: createdAt } },
+        // Seed orders are created directly at their final status rather than
+        // progressing through checkout()/updateOrderStatus() like a real
+        // order would — buildStatusHistory (shared with seedBulkOrders)
+        // reconstructs the same plausible multi-step trail a real order
+        // would have left, dated across [createdAt, now], so the Timeline's
+        // fixed roadmap shows every earlier milestone as actually reached
+        // instead of "Not yet reached" for a demo order that's long past it.
+        statusHistory: { create: buildStatusHistory(orderSeed.status, createdAt, new Date()) },
       },
     });
   }
@@ -2035,6 +2040,10 @@ async function seedBulkOrders(customers: { id: number }[], variantsBySku: Map<st
           finalStatus === OrderStatus.RETURNED
             ? `1Z999BLK${String(100000000 + i)}`
             : undefined,
+        deliveryStatus: pickDeliveryStatus(finalStatus),
+        easypostTrackingUrl: pickDeliveryStatus(finalStatus)
+          ? `https://track.easypost.com/bulk-${String(i + 1).padStart(6, "0")}`
+          : undefined,
         createdAt: placedAt,
         items: { create: items },
         statusHistory: { create: buildStatusHistory(finalStatus, placedAt, resolvedAt) },
@@ -2133,6 +2142,26 @@ async function seedPaymentMethodRules() {
 // default ("USPS") so the two never disagree.
 function pickCarrier(country: string) {
   return CARRIER_RULE_MAP[country] ?? "USPS";
+}
+
+// A real deliveryStatus/easypostTrackingUrl only ever gets written by the
+// live EasyPost integration (see shipping.service.ts), which seeding never
+// calls — so without this, every seeded shipment would show "Awaiting
+// tracking update" in the Delivery Tracking card and Deliveries page no
+// matter how far along the order actually is. This fakes EasyPost's own
+// status vocabulary from the order's final status so that UI has something
+// realistic to render. RETURNED orders were delivered before coming back,
+// so they still show "delivered" here (matches trackingNumber's handling).
+function pickDeliveryStatus(finalStatus: OrderStatus): string | undefined {
+  switch (finalStatus) {
+    case OrderStatus.SHIPPED:
+      return "in_transit";
+    case OrderStatus.DELIVERED:
+    case OrderStatus.RETURNED:
+      return "delivered";
+    default:
+      return undefined;
+  }
 }
 
 // Reconstructs StockAdjustment rows for every order created before the
