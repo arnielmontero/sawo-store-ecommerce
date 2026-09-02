@@ -14,10 +14,14 @@ import {
   deleteCarrierRule,
   fetchPaymentMethodRules,
   setPaymentMethodRules,
+  fetchTaxRules,
+  upsertTaxRule,
+  deleteTaxRule,
   clearAllData,
   resetSeedData,
   type CarrierRule,
   type PaymentMethodRule,
+  type TaxRule,
   type PaymentMethod,
   type ApiEnvironment,
 } from "@/lib/api";
@@ -97,6 +101,20 @@ export default function ConfigurationPage() {
     (acc[rule.country] ??= []).push(rule.paymentMethod);
     return acc;
   }, {});
+
+  const [taxRules, setTaxRules] = useState<TaxRule[]>([]);
+  const [taxRulesLoading, setTaxRulesLoading] = useState(true);
+  const [taxRuleCountry, setTaxRuleCountry] = useState(COUNTRIES[0].code);
+  const [taxRuleRate, setTaxRuleRate] = useState("");
+  const [taxRuleSaving, setTaxRuleSaving] = useState(false);
+  const [taxRuleError, setTaxRuleError] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetchTaxRules()
+      .then(setTaxRules)
+      .catch(() => {})
+      .finally(() => setTaxRulesLoading(false));
+  }, []);
 
   const [pendingReset, setPendingReset] = useState<"clear" | "seed" | null>(null);
   const [resetConfirmText, setResetConfirmText] = useState("");
@@ -284,6 +302,35 @@ export default function ConfigurationPage() {
       setPaymentRules((prev) => prev.filter((r) => r.country !== country));
     } catch (err) {
       setPaymentRuleError(err instanceof Error ? err.message : "Failed to remove rule.");
+    }
+  }
+
+  async function handleAddTaxRule() {
+    setTaxRuleError(null);
+    const rate = Number(taxRuleRate);
+    if (!taxRuleRate || Number.isNaN(rate) || rate < 0 || rate > 100) {
+      setTaxRuleError("Enter a tax rate between 0 and 100.");
+      return;
+    }
+    setTaxRuleSaving(true);
+    try {
+      const rule = await upsertTaxRule(taxRuleCountry, rate);
+      setTaxRules((prev) => [...prev.filter((r) => r.country !== rule.country), rule].sort((a, b) => a.country.localeCompare(b.country)));
+      setTaxRuleRate("");
+    } catch (err) {
+      setTaxRuleError(err instanceof Error ? err.message : "Failed to save tax rule.");
+    } finally {
+      setTaxRuleSaving(false);
+    }
+  }
+
+  async function handleDeleteTaxRule(id: number) {
+    setTaxRuleError(null);
+    try {
+      await deleteTaxRule(id);
+      setTaxRules((prev) => prev.filter((r) => r.id !== id));
+    } catch (err) {
+      setTaxRuleError(err instanceof Error ? err.message : "Failed to delete tax rule.");
     }
   }
 
@@ -845,6 +892,87 @@ export default function ConfigurationPage() {
           </div>
         )}
         {paymentRuleError && <p className="mt-3 text-sm text-brand-600">{paymentRuleError}</p>}
+      </div>
+
+      <div className="mt-6 max-w-xl rounded-xl border border-ink-100 bg-white p-6">
+        <label className="block text-xs font-medium uppercase tracking-wide text-ink-500">Tax rules</label>
+        <p className="mt-1 text-xs text-ink-400">
+          Flat sales-tax rate applied per shipping country at checkout. A country with no rule here has no tax.
+        </p>
+
+        {taxRulesLoading ? (
+          <p className="mt-2 text-sm text-ink-500">Loading...</p>
+        ) : taxRules.length === 0 ? (
+          <p className="mt-2 text-sm text-ink-400">No tax rules yet — every order is untaxed.</p>
+        ) : (
+          <table className="mt-3 w-full text-left text-sm">
+            <thead>
+              <tr className="border-b border-ink-100 text-xs uppercase tracking-wide text-ink-500">
+                <th className="py-2 font-medium">Country</th>
+                <th className="py-2 font-medium">Rate</th>
+                {canEdit && <th className="py-2 font-medium"></th>}
+              </tr>
+            </thead>
+            <tbody>
+              {taxRules.map((rule) => (
+                <tr key={rule.id} className="border-b border-ink-100 last:border-0">
+                  <td className="py-2 font-mono text-ink-900">{rule.country}</td>
+                  <td className="py-2 text-ink-700">{Number(rule.ratePercent)}%</td>
+                  {canEdit && (
+                    <td className="py-2 text-right">
+                      <button
+                        onClick={() => handleDeleteTaxRule(rule.id)}
+                        className="text-xs font-medium text-brand-600 hover:underline"
+                      >
+                        Remove
+                      </button>
+                    </td>
+                  )}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+
+        {canEdit && (
+          <div className="mt-4 flex items-end gap-2 border-t border-ink-100 pt-4">
+            <div>
+              <label className="block text-xs font-medium uppercase tracking-wide text-ink-500">Country</label>
+              <select
+                value={taxRuleCountry}
+                onChange={(e) => setTaxRuleCountry(e.target.value)}
+                className="mt-1 w-44 rounded-md border border-ink-100 px-3 py-1.5 text-sm outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
+              >
+                {COUNTRIES.map((c) => (
+                  <option key={c.code} value={c.code}>
+                    {c.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-medium uppercase tracking-wide text-ink-500">Rate (%)</label>
+              <input
+                type="number"
+                value={taxRuleRate}
+                onChange={(e) => setTaxRuleRate(e.target.value)}
+                min={0}
+                max={100}
+                step={0.01}
+                placeholder="e.g. 8.5"
+                className="mt-1 w-28 rounded-md border border-ink-100 px-3 py-1.5 text-sm outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
+              />
+            </div>
+            <button
+              onClick={handleAddTaxRule}
+              disabled={taxRuleSaving}
+              className="rounded-md bg-brand-500 px-3 py-1.5 text-sm font-medium text-white hover:bg-brand-600 disabled:opacity-50"
+            >
+              {taxRuleSaving ? "Saving..." : "Save rule"}
+            </button>
+          </div>
+        )}
+        {taxRuleError && <p className="mt-3 text-sm text-brand-600">{taxRuleError}</p>}
       </div>
 
       {canEdit && (

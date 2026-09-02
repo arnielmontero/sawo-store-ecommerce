@@ -341,6 +341,30 @@ export interface CarrierRule {
   carrier: string;
 }
 
+export type CouponType = "PERCENTAGE" | "FIXED_AMOUNT" | "FREE_SHIPPING";
+
+export interface Coupon {
+  id: number;
+  code: string;
+  type: CouponType;
+  value: number | null;
+  startsAt: string | null;
+  endsAt: string | null;
+  isActive: boolean;
+  maxUses: number | null;
+  usageCount: number;
+  createdAt: string;
+}
+
+export interface CouponInput {
+  code: string;
+  type: CouponType;
+  value?: number;
+  startsAt?: string;
+  endsAt?: string;
+  maxUses?: number;
+}
+
 export interface PaymentMethodRule {
   id: number;
   country: string;
@@ -507,8 +531,30 @@ export interface OrderStatistics {
   countsByStatus: { status: OrderStatus; count: number }[];
 }
 
+export async function fetchInvoiceUrl(orderId: number): Promise<string> {
+  const res = await fetch(`${API_URL}/api/orders/${orderId}/invoice`, {
+    credentials: "include",
+    headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : {},
+  });
+  if (!res.ok) throw new ApiError(res.status, "Failed to generate invoice");
+  const blob = await res.blob();
+  return URL.createObjectURL(blob);
+}
+
 export async function fetchOrderStatistics(): Promise<OrderStatistics> {
   return apiFetch("/api/orders/statistics");
+}
+
+export interface TopProduct {
+  productId: number;
+  title: string;
+  unitsSold: number;
+  revenueCents: number;
+}
+
+export async function fetchTopProducts(limit = 5): Promise<TopProduct[]> {
+  const data = await apiFetch(`/api/orders/top-products?limit=${limit}`);
+  return data.products;
 }
 
 export interface HeldOrder {
@@ -915,6 +961,81 @@ export async function setPaymentMethodRules(country: string, methods: PaymentMet
     body: JSON.stringify({ methods }),
   });
   return data.rules;
+}
+
+export interface StaffUser {
+  id: number;
+  username: string;
+  name: string;
+  role: AdminRole;
+  createdAt: string;
+}
+
+export async function fetchStaff(): Promise<StaffUser[]> {
+  const data = await apiFetch("/api/v1/staff");
+  return data.users;
+}
+
+export async function createStaff(input: { username: string; password: string; name: string; role: AdminRole }): Promise<StaffUser> {
+  const data = await apiFetch("/api/v1/staff", { method: "POST", body: JSON.stringify(input) });
+  return data.user;
+}
+
+export async function updateStaff(id: number, input: { name?: string; role?: AdminRole; password?: string }): Promise<StaffUser> {
+  const data = await apiFetch(`/api/v1/staff/${id}`, { method: "PATCH", body: JSON.stringify(input) });
+  return data.user;
+}
+
+export async function deleteStaff(id: number): Promise<void> {
+  await apiFetch(`/api/v1/staff/${id}`, { method: "DELETE" });
+}
+
+export interface TaxRule {
+  id: number;
+  country: string;
+  ratePercent: string;
+}
+
+export async function fetchTaxRules(): Promise<TaxRule[]> {
+  const data = await apiFetch("/api/v1/tax-rules");
+  return data.rules;
+}
+
+export async function upsertTaxRule(country: string, ratePercent: number): Promise<TaxRule> {
+  const data = await apiFetch("/api/v1/tax-rules", {
+    method: "POST",
+    body: JSON.stringify({ country, ratePercent }),
+  });
+  return data.rule;
+}
+
+export async function deleteTaxRule(id: number): Promise<void> {
+  await apiFetch(`/api/v1/tax-rules/${id}`, { method: "DELETE" });
+}
+
+export async function fetchCoupons(): Promise<Coupon[]> {
+  const data = await apiFetch("/api/v1/coupons");
+  return data.coupons;
+}
+
+export async function createCoupon(input: CouponInput): Promise<Coupon> {
+  const data = await apiFetch("/api/v1/coupons", {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+  return data.coupon;
+}
+
+export async function updateCoupon(id: number, input: Partial<CouponInput> & { isActive?: boolean }): Promise<Coupon> {
+  const data = await apiFetch(`/api/v1/coupons/${id}`, {
+    method: "PATCH",
+    body: JSON.stringify(input),
+  });
+  return data.coupon;
+}
+
+export async function deleteCoupon(id: number): Promise<void> {
+  await apiFetch(`/api/v1/coupons/${id}`, { method: "DELETE" });
 }
 
 export async function fetchPayments(

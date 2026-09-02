@@ -15,6 +15,7 @@
   "dependencies": {
     "@easypost/api": "^8.9.0",
     "@prisma/client": "^5.20.0",
+    "@types/pdfkit": "^0.17.6",
     "cookie-parser": "^1.4.7",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
@@ -24,6 +25,7 @@
     "helmet": "^7.1.0",
     "jsonwebtoken": "^9.0.3",
     "multer": "^2.3.0",
+    "pdfkit": "^0.20.2",
     "stripe": "^22.6.0",
     "zod": "^3.23.8"
   },

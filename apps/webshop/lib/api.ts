@@ -41,6 +41,8 @@ export interface Product {
   tags: Tag[];
   variantCount: number;
   totalStock: number;
+  rating: number | null;
+  reviewCount: number;
   isBestSeller: boolean;
   isNew: boolean;
   isOnSale: boolean;
@@ -74,6 +76,8 @@ export interface ProductDetail {
   category: { id: number; name: string; slug: string } | null;
   images: ProductImage[];
   variants: VariantDetail[];
+  rating: number | null;
+  reviewCount: number;
   isBestSeller: boolean;
   isNew: boolean;
   isOnSale: boolean;
@@ -102,6 +106,37 @@ async function apiFetch(path: string, init?: RequestInit) {
     throw new ApiError(res.status, data.error ?? `Request failed (${res.status})`);
   }
   return res.json();
+}
+
+export interface CouponPreview {
+  discountCents: number;
+  shippingCents: number;
+  totalCents: number;
+  appliedCoupon: { id: number; code: string; type: "PERCENTAGE" | "FIXED_AMOUNT" | "FREE_SHIPPING" } | null;
+}
+
+// The one exception to this file's "read-only" scope above: this doesn't
+// create/update/delete anything, it's a stateless preview of what a coupon
+// code would do to the current cart (see coupons.routes.ts's public
+// /validate route, backed by pricing.service.ts's priceCart — the same
+// validation checkout() itself runs, just without creating an order or
+// consuming a use). POST because the cart's line items don't fit in a
+// query string, not because it mutates anything server-side.
+export async function validateCoupon(
+  code: string,
+  items: { variantId: number; quantity: number }[]
+): Promise<CouponPreview> {
+  const res = await fetch(`${API_URL}/api/v1/coupons/validate`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ code, items }),
+    cache: "no-store",
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new ApiError(res.status, data.error ?? `Request failed (${res.status})`);
+  }
+  return data;
 }
 
 export async function fetchCategoryTree(): Promise<Category[]> {

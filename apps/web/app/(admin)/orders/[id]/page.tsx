@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { useParams, useSearchParams } from "next/navigation";
 import Link from "next/link";
-import { fetchOrder, updateOrderStatus, refundPayment, addOrderNote, type OrderDetail, type OrderStatus } from "@/lib/api";
+import { fetchOrder, updateOrderStatus, refundPayment, addOrderNote, fetchInvoiceUrl, type OrderDetail, type OrderStatus } from "@/lib/api";
 import { formatCents, formatPaymentMethod } from "@/lib/format";
 import { StatusBadge } from "@/components/StatusBadge";
 import { useAuth } from "@/lib/auth-context";
@@ -32,6 +32,24 @@ export default function OrderDetailPage() {
   const [noteBody, setNoteBody] = useState("");
   const [noteError, setNoteError] = useState<string | null>(null);
   const [noteSaving, setNoteSaving] = useState(false);
+  const [invoiceLoading, setInvoiceLoading] = useState(false);
+
+  async function handleDownloadInvoice() {
+    if (!order) return;
+    setInvoiceLoading(true);
+    try {
+      const url = await fetchInvoiceUrl(order.id);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `invoice-${order.reference}.pdf`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : "Failed to download invoice.");
+    } finally {
+      setInvoiceLoading(false);
+    }
+  }
 
   function load() {
     fetchOrder(Number(params.id))
@@ -116,8 +134,16 @@ export default function OrderDetailPage() {
           <h1 className="text-2xl font-semibold text-ink-900">{order.reference}</h1>
           <StatusBadge status={order.status} />
         </div>
-        {canStaffAct && NEXT_STATES[order.status].length > 0 && (
-          <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2">
+          <button
+            onClick={handleDownloadInvoice}
+            disabled={invoiceLoading}
+            className="rounded-md border border-ink-100 px-4 py-2 text-sm font-medium text-ink-700 hover:bg-gray-50 disabled:opacity-50"
+          >
+            {invoiceLoading ? "Generating..." : "Download invoice"}
+          </button>
+          {canStaffAct && NEXT_STATES[order.status].length > 0 && (
+            <>
             {NEXT_STATES[order.status].map((next) => (
               <button
                 key={next}
@@ -132,8 +158,9 @@ export default function OrderDetailPage() {
                 {updating === next ? "Updating..." : ACTION_LABELS[next]}
               </button>
             ))}
-          </div>
-        )}
+            </>
+          )}
+        </div>
       </div>
 
       {actionError && (

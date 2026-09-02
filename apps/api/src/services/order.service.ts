@@ -100,6 +100,43 @@ export async function getOrderStatistics() {
   return { totalOrders, totalRevenueCents, avgOrderValueCents, newClientCount, countsByStatus };
 }
 
+// Powers the Dashboard's "Top products" panel — revenue and units sold,
+// summed across completed orders only (same REVENUE_STATUSES as
+// getOrderStatistics, so the two panels never disagree about what counts as
+// a real sale). Rolled up to product level (not variant) since that's how a
+// merchandiser actually thinks about "what's selling" — a customer picking
+// between two colors of the same product isn't a meaningfully different
+// top-seller from their perspective.
+//
+// Revenue-by-product has no Prisma groupBy shortcut (there's no "sum of
+// quantity * unitPriceCents" aggregate), so this reads the raw order items
+// and folds them in JS instead of trusting a misleading _sum.
+export async function getTopProducts(limit = 5) {
+  const items = await prisma.orderItem.findMany({
+    where: { order: { status: { in: REVENUE_STATUSES } } },
+    select: {
+      quantity: true,
+      unitPriceCents: true,
+      variant: { select: { productId: true, product: { select: { title: true } } } },
+    },
+  });
+
+  const byProduct = new Map<number, { productId: number; title: string; unitsSold: number; revenueCents: number }>();
+  for (const item of items) {
+    const { productId, product } = item.variant;
+    const lineRevenue = item.quantity * item.unitPriceCents;
+    const existing = byProduct.get(productId);
+    if (existing) {
+      existing.unitsSold += item.quantity;
+      existing.revenueCents += lineRevenue;
+    } else {
+      byProduct.set(productId, { productId, title: product.title, unitsSold: item.quantity, revenueCents: lineRevenue });
+    }
+  }
+
+  return [...byProduct.values()].sort((a, b) => b.revenueCents - a.revenueCents).slice(0, limit);
+}
+
 const EXPORT_HEADERS = [
   "Reference",
   "Status",
@@ -241,6 +278,7 @@ export interface CheckoutInput {
   paymentMethod: PaymentMethod;
   shippingAddress?: string;
   shippingCountry?: string;
+  couponCode?: string;
 }
 
 // Validates the cart, re-prices it server-side, reserves stock for every
@@ -256,7 +294,7 @@ export async function checkout(input: CheckoutInput) {
     );
   }
 
-  const pricing = await priceCart(input.items);
+  const pricing = await priceCart(input.items, input.couponCode, input.shippingCountry);
 
   const reservedSoFar: CartLine[] = [];
   try {
@@ -276,31 +314,69 @@ export async function checkout(input: CheckoutInput) {
 
   const carrier = await assignCarrier(input.shippingCountry);
 
-  const order = await prisma.order.create({
-    data: {
-      reference: generateReference(),
-      status: OrderStatus.PENDING,
-      paymentMethod: input.paymentMethod,
-      subtotalCents: pricing.subtotalCents,
-      discountCents: pricing.discountCents,
-      shippingCents: pricing.shippingCents,
-      taxCents: pricing.taxCents,
-      totalCents: pricing.totalCents,
-      shippingAddress: input.shippingAddress,
-      shippingCountry: input.shippingCountry,
-      carrier,
-      userId: input.userId,
-      items: {
-        create: pricing.lines.map((line) => ({
-          variantId: line.variantId,
-          quantity: line.quantity,
-          unitPriceCents: line.unitPriceCents,
-        })),
-      },
-      statusHistory: { create: { status: OrderStatus.PENDING } },
-    },
-    include: { items: true },
-  });
+  // Coupon usage must be checked-and-incremented atomically with order
+  // creation, or a burst of concurrent checkouts against a near-exhausted
+  // coupon could all read usageCount < maxUses and overrun the cap. The
+  // conditional update below guards on the exact usageCount value just
+  // read — if another request incremented it first (or maxUses was already
+  // reached), the update matches 0 rows and this request fails cleanly
+  // instead of silently over-issuing the coupon. Stock reservation stays
+  // outside this transaction (existing compensating-rollback pattern above)
+  // — only the coupon-usage-check + order-create need atomicity together.
+  let order;
+  try {
+    order = await prisma.$transaction(async (tx) => {
+      if (pricing.appliedCoupon) {
+        const coupon = await tx.coupon.findUnique({ where: { id: pricing.appliedCoupon.id } });
+        if (!coupon || (coupon.maxUses != null && coupon.usageCount >= coupon.maxUses)) {
+          throw new HttpError(409, "This coupon has reached its usage limit");
+        }
+        const updated = await tx.coupon.updateMany({
+          where: { id: coupon.id, usageCount: coupon.usageCount },
+          data: { usageCount: { increment: 1 } },
+        });
+        if (updated.count === 0) {
+          throw new HttpError(409, "This coupon has reached its usage limit");
+        }
+      }
+
+      return tx.order.create({
+        data: {
+          reference: generateReference(),
+          status: OrderStatus.PENDING,
+          paymentMethod: input.paymentMethod,
+          subtotalCents: pricing.subtotalCents,
+          discountCents: pricing.discountCents,
+          shippingCents: pricing.shippingCents,
+          taxCents: pricing.taxCents,
+          totalCents: pricing.totalCents,
+          shippingAddress: input.shippingAddress,
+          shippingCountry: input.shippingCountry,
+          carrier,
+          userId: input.userId,
+          couponId: pricing.appliedCoupon?.id,
+          couponCode: pricing.appliedCoupon?.code,
+          items: {
+            create: pricing.lines.map((line) => ({
+              variantId: line.variantId,
+              quantity: line.quantity,
+              unitPriceCents: line.unitPriceCents,
+            })),
+          },
+          statusHistory: { create: { status: OrderStatus.PENDING } },
+        },
+        include: { items: true },
+      });
+    });
+  } catch (err) {
+    // Mirror the stock-reservation rollback above — a coupon race/failure
+    // here must release the stock already reserved for this attempt too,
+    // or a failed checkout would leave phantom stock held.
+    for (const line of reservedSoFar) {
+      await releaseStock(line.variantId, line.quantity);
+    }
+    throw err;
+  }
 
   return order;
 }

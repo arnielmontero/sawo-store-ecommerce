@@ -5,6 +5,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { useCart } from "@/context/CartContext";
 import { formatCents } from "@/lib/format";
+import { validateCoupon, type CouponPreview } from "@/lib/api";
 
 // There's no customer-facing order/payment API yet — order creation and
 // Stripe charges only exist on the admin side of this app today. This page
@@ -15,6 +16,37 @@ export default function CheckoutPage() {
   const { items, subtotalCents, clear } = useCart();
   const router = useRouter();
   const [submitting, setSubmitting] = useState(false);
+
+  const [couponCode, setCouponCode] = useState("");
+  const [applying, setApplying] = useState(false);
+  const [couponError, setCouponError] = useState<string | null>(null);
+  const [appliedCoupon, setAppliedCoupon] = useState<CouponPreview | null>(null);
+
+  async function handleApplyCoupon() {
+    if (!couponCode.trim()) return;
+    setApplying(true);
+    setCouponError(null);
+    try {
+      const preview = await validateCoupon(
+        couponCode.trim(),
+        items.map((item) => ({ variantId: item.variantId, quantity: item.quantity }))
+      );
+      setAppliedCoupon(preview);
+    } catch (err) {
+      setAppliedCoupon(null);
+      setCouponError(err instanceof Error ? err.message : "Failed to apply coupon.");
+    } finally {
+      setApplying(false);
+    }
+  }
+
+  function handleRemoveCoupon() {
+    setAppliedCoupon(null);
+    setCouponCode("");
+    setCouponError(null);
+  }
+
+  const displayTotalCents = appliedCoupon ? appliedCoupon.totalCents : subtotalCents;
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -36,7 +68,7 @@ export default function CheckoutPage() {
   }
 
   return (
-    <div className="mx-auto max-w-5xl px-4 py-10 sm:px-6 lg:px-8">
+    <div className="mx-auto max-w-[1400px] px-4 py-10 sm:px-6 lg:px-10">
       <h1 className="mb-2 font-serif text-3xl font-semibold text-ink-900">Checkout</h1>
       <p className="mb-8 text-sm text-ink-500">
         Demo checkout — no payment is charged. An admin representative reviews and confirms real orders.
@@ -86,9 +118,49 @@ export default function CheckoutPage() {
               </li>
             ))}
           </ul>
-          <div className="flex items-center justify-between border-t border-ink-100 pt-4 text-base font-semibold text-ink-900">
-            <span>Total</span>
-            <span>{formatCents(subtotalCents)}</span>
+          <div className="border-t border-ink-100 pt-4">
+            {appliedCoupon ? (
+              <div className="mb-3 flex items-center justify-between rounded-lg bg-green-50 px-3 py-2 text-sm text-green-700">
+                <span>
+                  Code <strong className="font-mono">{appliedCoupon.appliedCoupon?.code}</strong> applied
+                </span>
+                <button type="button" onClick={handleRemoveCoupon} className="text-xs font-medium underline">
+                  Remove
+                </button>
+              </div>
+            ) : (
+              <div className="mb-3">
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={couponCode}
+                    onChange={(e) => setCouponCode(e.target.value)}
+                    placeholder="Promo code"
+                    className="min-w-0 flex-1 rounded-xl border border-ink-100 px-3 py-2 text-sm"
+                  />
+                  <button
+                    type="button"
+                    onClick={handleApplyCoupon}
+                    disabled={applying || !couponCode.trim()}
+                    className="shrink-0 rounded-xl border border-ink-200 px-4 py-2 text-sm font-semibold text-ink-700 hover:bg-gray-50 disabled:opacity-60"
+                  >
+                    {applying ? "Applying…" : "Apply"}
+                  </button>
+                </div>
+                {couponError && <p className="mt-1 text-xs text-red-600">{couponError}</p>}
+              </div>
+            )}
+
+            {appliedCoupon && appliedCoupon.discountCents > 0 && (
+              <div className="mb-1 flex items-center justify-between text-sm text-ink-500">
+                <span>Discount</span>
+                <span>-{formatCents(appliedCoupon.discountCents)}</span>
+              </div>
+            )}
+            <div className="flex items-center justify-between text-base font-semibold text-ink-900">
+              <span>Total</span>
+              <span>{formatCents(displayTotalCents)}</span>
+            </div>
           </div>
           <button
             type="submit"

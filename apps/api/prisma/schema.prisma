@@ -327,9 +327,9 @@ model Order {
   // EasyPost tracker (test mode) created when the order is marked shipped —
   // see shipping.service.ts. Null until then; deliveryStatus is refreshed
   // from EasyPost's own tracker.status on each Deliveries page load.
-  easypostTrackerId  String?
+  easypostTrackerId   String?
   easypostTrackingUrl String?
-  deliveryStatus     String?
+  deliveryStatus      String?
 
   // Payment/idempotency — paymentAttemptCount increments on every call to
   // POST /payments/intent for this order, and the value at call time forms
@@ -356,13 +356,26 @@ model Order {
   // REFUNDED); only meaningfully tracked once partial refunds are in play.
   refundedCents Int @default(0)
 
+  // Nullable - most orders have no coupon. Kept as a real FK (unlike
+  // OrderNote.authorName-style snapshots) because a coupon is reference
+  // data an admin may legitimately want to query "orders that used X" from,
+  // and coupons are cheap to keep around (soft-deactivate via isActive
+  // rather than hard delete). couponCode is still snapshotted as a plain
+  // string alongside the FK so the order stays legible (shows "SAVE10" on
+  // the receipt/detail page) even in the edge case a coupon row is later
+  // hard-deleted; the FK uses onDelete: SetNull for that same reason - a
+  // deleted coupon must never cascade-delete or orphan historical orders.
+  couponId   Int?
+  coupon     Coupon? @relation(fields: [couponId], references: [id], onDelete: SetNull)
+  couponCode String?
+
   userId Int?
   user   User? @relation(fields: [userId], references: [id])
 
   items OrderItem[]
 
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
   // First time this order's status transitioned to PAID — set once inside
   // setOrderStatus and never overwritten afterward. Deliberately distinct
   // from updatedAt, which bumps on ANY field write (a staff note, a refund)
@@ -378,6 +391,7 @@ model Order {
   @@index([status])
   @@index([userId])
   @@index([status, paidAt])
+  @@index([couponId])
 }
 
 // One row per refund event (full or partial) — the audit trail for "how
@@ -701,8 +715,8 @@ enum ApiEnvironment {
 // columns here as Configuration grows rather than one-off hardcoded values
 // elsewhere in the UI.
 model StoreSettings {
-  id                  Int      @id @default(1)
-  storeName           String   @default("Sawo Shop")
+  id                  Int     @id @default(1)
+  storeName           String  @default("Sawo Shop")
   // Null means "no logo uploaded" — the Sidebar falls back to a plain
   // initial-letter box in that case rather than a broken image.
   logoUrl             String?
@@ -710,9 +724,9 @@ model StoreSettings {
   // PARTIALLY_REFUNDED state with specific items/quantities held out of
   // inventory, which is a real operational mode staff need to opt into
   // rather than have silently available. See payment.service.ts refundOrder.
-  allowPartialRefunds Boolean  @default(false)
+  allowPartialRefunds Boolean @default(false)
   // Used when an order's shippingCountry has no matching CarrierRule.
-  defaultCarrier      String   @default("USPS")
+  defaultCarrier      String  @default("USPS")
 
   // Which pair of credentials below is actually used to build the
   // Stripe/EasyPost clients — see lib/credentials.ts. SANDBOX by default so
@@ -728,14 +742,58 @@ model StoreSettings {
   // ADMIN-only write (see settings.routes.ts) is this table's only access
   // control, same trust boundary as the rest of it — this is a backoffice
   // tool, not a secrets vault.
-  stripeSecretKeyTest      String? @db.Text
-  stripeWebhookSecretTest  String? @db.Text
-  easypostApiKeyTest       String? @db.Text
-  stripeSecretKeyLive      String? @db.Text
-  stripeWebhookSecretLive  String? @db.Text
-  easypostApiKeyLive       String? @db.Text
+  stripeSecretKeyTest     String? @db.Text
+  stripeWebhookSecretTest String? @db.Text
+  easypostApiKeyTest      String? @db.Text
+  stripeSecretKeyLive     String? @db.Text
+  stripeWebhookSecretLive String? @db.Text
+  easypostApiKeyLive      String? @db.Text
 
   updatedAt DateTime @updatedAt
+}
+
+enum CouponType {
+  PERCENTAGE
+  FIXED_AMOUNT
+  FREE_SHIPPING
+}
+
+// Admin-managed discount codes applied at checkout (see pricing.service.ts's
+// priceCart and order.service.ts's checkout). code is the natural key
+// customers type in - stored uppercase so lookups are case-insensitive
+// without a DB-level collation dependency (see coupon.service.ts).
+model Coupon {
+  id    Int        @id @default(autoincrement())
+  code  String     @unique
+  type  CouponType
+  // Meaning depends on type: PERCENTAGE -> 1-100 (percent off subtotal),
+  // FIXED_AMOUNT -> cents off subtotal, FREE_SHIPPING -> always null (there's
+  // no numeric value to apply; shippingCents is zeroed directly instead of
+  // treated as a discount amount, see priceCart).
+  value Int?
+
+  // Same null-window convention as Product.saleStartsAt/saleEndsAt: both
+  // null means the coupon is active indefinitely (as long as isActive is
+  // true); a set window is checked at read time, no cron required.
+  startsAt DateTime?
+  endsAt   DateTime?
+
+  // Manual on/off switch independent of the date window - lets an admin
+  // kill a coupon immediately without needing to know/edit its window.
+  isActive Boolean @default(true)
+
+  // Null = unlimited. Enforced against usageCount at checkout time inside a
+  // transaction (see order.service.ts's checkout) so a burst of concurrent
+  // checkouts can't overrun the cap.
+  maxUses    Int?
+  usageCount Int  @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  orders Order[]
+
+  @@index([isActive])
 }
 
 // Country -> carrier assignment rules, editable from Configuration. Checked
@@ -760,4 +818,23 @@ model PaymentMethodRule {
 
   @@unique([country, paymentMethod])
   @@index([country])
+}
+
+// Country -> flat sales-tax rate, editable from Configuration. A real tax
+// engine (TaxJar/Avalara — jurisdiction-specific rates, nexus rules, product
+// tax categories) is out of scope, same reasoning pricing.service.ts's old
+// comment gave for stubbing tax at 0: no such API account exists yet. This
+// is the same shape as CarrierRule/PaymentMethodRule instead — a flat
+// per-country rate an admin sets by hand, applied to the discounted
+// subtotal at checkout (see pricing.service.ts's priceCart). A country with
+// no row here has no tax, matching PaymentMethodRule's "absence means no
+// restriction" default rather than erroring or assuming some rate.
+model TaxRule {
+  id            Int    @id @default(autoincrement())
+  country       String @unique // ISO 3166-1 alpha-2, e.g. "US"
+  // Percent, not basis points — e.g. 8.5 means 8.5%. Decimal for the cents
+  // math in priceCart to stay exact enough for real-world rates like
+  // Canada's 5% GST + 7.5% QST combined as one 12.5% row (this app has no
+  // multi-line tax breakdown, just one effective rate per country).
+  ratePercent Decimal @db.Decimal(5, 2)
 }

@@ -12,11 +12,14 @@ import {
   getOrderById,
   getOrdersForUser,
   getOrderStatistics,
+  getTopProducts,
   listHeldOrders,
   listOrders,
   updateOrderStatus,
 } from "../services/order.service";
 import { approveReturnRequest, logReturnRequest, rejectReturnRequest } from "../services/returnRequest.service";
+import { getStoreSettings } from "../services/settings.service";
+import { buildInvoicePdf } from "../lib/invoicePdf";
 
 export const ordersRouter = Router();
 
@@ -33,6 +36,7 @@ const checkoutSchema = z.object({
   paymentMethod: z.nativeEnum(PaymentMethod),
   shippingAddress: z.string().optional(),
   shippingCountry: z.string().length(2).toUpperCase().optional(),
+  couponCode: z.string().min(1).max(30).optional(),
 });
 
 // "Customer" access per the design — no customer auth system exists yet
@@ -105,6 +109,16 @@ ordersRouter.get("/statistics", async (_req, res, next) => {
   }
 });
 
+ordersRouter.get("/top-products", async (req, res, next) => {
+  try {
+    const limit = req.query.limit ? Number(req.query.limit) : undefined;
+    const products = await getTopProducts(limit);
+    res.json({ products });
+  } catch (err) {
+    next(err);
+  }
+});
+
 ordersRouter.get("/held", async (_req, res, next) => {
   try {
     const orders = await listHeldOrders();
@@ -135,6 +149,21 @@ ordersRouter.get("/:id", async (req, res, next) => {
     const order = await getOrderById(id);
     if (!order) throw new HttpError(404, "Order not found");
     res.json({ order });
+  } catch (err) {
+    next(err);
+  }
+});
+
+ordersRouter.get("/:id/invoice", async (req, res, next) => {
+  try {
+    const id = Number(req.params.id);
+    const order = await getOrderById(id);
+    if (!order) throw new HttpError(404, "Order not found");
+    const settings = await getStoreSettings();
+    const buffer = await buildInvoicePdf(order, settings.storeName);
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `attachment; filename="invoice-${order.reference}.pdf"`);
+    res.send(buffer);
   } catch (err) {
     next(err);
   }

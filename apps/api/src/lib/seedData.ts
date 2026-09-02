@@ -1,4 +1,11 @@
-import { OrderStatus, PaymentMethod, AdminRole, StockAdjustmentReason, ReturnRequestStatus } from "@prisma/client";
+import {
+  OrderStatus,
+  PaymentMethod,
+  AdminRole,
+  StockAdjustmentReason,
+  ReturnRequestStatus,
+  CouponType,
+} from "@prisma/client";
 import { prisma } from "./prisma";
 import { hashPassword } from "./password";
 import { env } from "./env";
@@ -2136,6 +2143,61 @@ async function seedPaymentMethodRules() {
   }
 }
 
+// Demo country -> flat tax rate rules (see taxRule.service.ts's
+// getTaxRateForCountry, applied in pricing.service.ts's priceCart). DE/FR
+// use their real combined VAT rate; CA/AU are deliberately left
+// unconfigured, same "demonstrate the no-rule default too" reasoning as
+// PAYMENT_METHOD_RULE_MAP above — those orders show $0 tax, not an error.
+const TAX_RULE_MAP: Record<string, number> = {
+  US: 7.25, // Representative flat state sales tax rate for the demo store's home market.
+  DE: 19, // German VAT (Mehrwertsteuer).
+  FR: 20, // French VAT (TVA).
+};
+
+async function seedTaxRules() {
+  const existingCount = await prisma.taxRule.count();
+  if (existingCount > 0) return;
+
+  for (const [country, ratePercent] of Object.entries(TAX_RULE_MAP)) {
+    await prisma.taxRule.create({ data: { country, ratePercent } });
+  }
+}
+
+// Demo coupon codes covering every type and every rejection path a real
+// checkout can hit — SAVE10/FLAT5/FREESHIP are live and usable end-to-end
+// through the storefront, while EXPIRED20 and USEDUP exist specifically to
+// exercise pricing.service.ts's validation errors (expired window, maxUses
+// reached) without needing to manually create that state by hand.
+async function seedCoupons() {
+  const existingCount = await prisma.coupon.count();
+  if (existingCount > 0) return;
+
+  await prisma.coupon.create({
+    data: { code: "SAVE10", type: CouponType.PERCENTAGE, value: 10 },
+  });
+  await prisma.coupon.create({
+    data: { code: "FLAT5", type: CouponType.FIXED_AMOUNT, value: 500 },
+  });
+  await prisma.coupon.create({
+    data: { code: "FREESHIP", type: CouponType.FREE_SHIPPING },
+  });
+  // Expired well before "today" so it's unambiguously inactive by date, not
+  // by coincidence of when the seed happens to run.
+  await prisma.coupon.create({
+    data: {
+      code: "EXPIRED20",
+      type: CouponType.PERCENTAGE,
+      value: 20,
+      startsAt: new Date("2025-01-01"),
+      endsAt: new Date("2025-02-01"),
+    },
+  });
+  // Demonstrates the maxUses-exhausted rejection path independent of dates.
+  await prisma.coupon.create({
+    data: { code: "USEDUP", type: CouponType.FIXED_AMOUNT, value: 1000, maxUses: 1, usageCount: 1 },
+  });
+}
+
 // Mirrors carrier.service.ts's assignCarrier without the async settings
 // lookup — bulk seed generation needs this synchronously for hundreds of
 // rows, and the fallback here matches StoreSettings.defaultCarrier's own
@@ -2341,6 +2403,8 @@ export async function runSeed(): Promise<string> {
   await seedSettings();
   await seedCarrierRules();
   await seedPaymentMethodRules();
+  await seedCoupons();
+  await seedTaxRules();
   const customers = await seedCustomers();
   const bulkCustomers = await seedBulkCustomers();
   await seedCustomerProfileDetails(customers);
@@ -2376,6 +2440,8 @@ export async function runSeed(): Promise<string> {
     `completed order, 20 cart-interest leads spread across curated and bulk customers (most holding ` +
     `multiple products), ${Object.keys(CARRIER_RULE_MAP).length} country-carrier rules and ` +
     `${Object.keys(PAYMENT_METHOD_RULE_MAP).length} country-payment-method rules, ` +
+    `5 demo coupons (percentage, fixed-amount, free-shipping, expired, and usage-exhausted), ` +
+    `${Object.keys(TAX_RULE_MAP).length} country-tax rules, ` +
     `and enabled partial refunds in store settings.`
   );
 }
