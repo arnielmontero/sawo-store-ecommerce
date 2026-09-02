@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import {
   fetchShipments,
   exportShipmentsCsvUrl,
@@ -289,7 +290,15 @@ export function PendingTab() {
                       <input type="checkbox" checked={selectedIds.has(order.id)} onChange={() => toggleSelect(order.id)} className="h-4 w-4" />
                     </td>
                     <td className="px-3 py-3 font-medium text-ink-900">
-                      {order.reference}
+                      <Link
+                        href={`/orders/${order.id}?readonly=1`}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="hover:text-brand-600 hover:underline"
+                        title="Open order for review in a new tab"
+                      >
+                        {order.reference}
+                      </Link>
                       <OverdueBadge reason={order.overdueReason} paidAt={order.paidAt} updatedAt={order.updatedAt} />
                     </td>
                     <td className="px-3 py-3 text-ink-700">{order.items.reduce((sum, item) => sum + item.quantity, 0)}</td>

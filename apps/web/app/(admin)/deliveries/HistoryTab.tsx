@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { fetchShipments, exportShipmentsCsvUrl, type Shipment, type ShipmentSortField, type SortDir } from "@/lib/api";
 import { formatCents } from "@/lib/format";
 import { StatusBadge } from "@/components/StatusBadge";
@@ -150,7 +151,17 @@ export function HistoryTab() {
             <tbody>
               {orders.map((order) => (
                 <tr key={order.id} className="border-b border-ink-100 last:border-0 hover:bg-gray-50">
-                  <td className="px-5 py-3 font-medium text-ink-900">{order.reference}</td>
+                  <td className="px-5 py-3 font-medium text-ink-900">
+                    <Link
+                      href={`/orders/${order.id}?readonly=1`}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="hover:text-brand-600 hover:underline"
+                      title="Open order for review in a new tab"
+                    >
+                      {order.reference}
+                    </Link>
+                  </td>
                   <td className="px-3 py-3 text-ink-700">{order.shippingCountry ?? "—"}</td>
                   <td className="px-3 py-3 text-ink-700">{order.carrier ?? "—"}</td>
                   <td className="px-3 py-3 font-mono text-xs text-ink-700">{order.trackingNumber ?? "—"}</td>
