@@ -20,7 +20,7 @@ shippingRouter.use(requireAuth, requireRole(AdminRole.ADMIN, AdminRole.FULFILLME
 // multi-select handling).
 const toArraySchema = z.union([z.string(), z.array(z.string())]).transform((v) => (Array.isArray(v) ? v : [v]));
 
-const listQuerySchema = z.object({
+const listQueryBaseSchema = z.object({
   tab: z.enum(["pending", "in-transit", "history"]),
   search: z.string().optional(),
   carrier: toArraySchema.optional(),
@@ -31,6 +31,17 @@ const listQuerySchema = z.object({
   sortDir: z.enum(["asc", "desc"]).optional(),
   page: z.coerce.number().int().positive().optional(),
 });
+
+// Rejects an inverted range outright rather than silently matching zero
+// rows (gte dateFrom AND lte dateTo can never both hold when
+// dateFrom > dateTo) — the date pickers already prevent this in the UI via
+// min/max, this is the backstop for any other caller. Applied to both the
+// list and export schemas below (export first .omit()s page, which needs
+// the base object shape, so the refine is layered on after).
+const dateRangeRefinement = (q: { dateFrom?: string; dateTo?: string }) => !q.dateFrom || !q.dateTo || q.dateFrom <= q.dateTo;
+const dateRangeIssue = { message: "dateFrom must not be after dateTo", path: ["dateFrom"] };
+
+const listQuerySchema = listQueryBaseSchema.refine(dateRangeRefinement, dateRangeIssue);
 
 // Registered before "/:orderId"-shaped routes so "export"/"statistics"
 // never get parsed as an order id — same precaution as orders.routes.ts.
@@ -62,7 +73,7 @@ shippingRouter.get("/", async (req, res, next) => {
 // filters behave identically between the list and its export.
 shippingRouter.get("/export", async (req, res, next) => {
   try {
-    const q = listQuerySchema.omit({ page: true }).parse(req.query);
+    const q = listQueryBaseSchema.omit({ page: true }).refine(dateRangeRefinement, dateRangeIssue).parse(req.query);
     const csv = await exportShipmentsCsv(q.tab, {
       search: q.search,
       carrier: q.carrier,

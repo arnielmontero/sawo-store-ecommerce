@@ -67,13 +67,22 @@ ordersRouter.get("/me", async (req, res, next) => {
 // Everything below is backoffice-only.
 ordersRouter.use(requireAuth);
 
-const listQuerySchema = z.object({
-  search: z.string().optional(),
-  status: z.nativeEnum(OrderStatus).optional(),
-  dateFrom: z.string().optional(),
-  dateTo: z.string().optional(),
-  page: z.coerce.number().int().positive().optional(),
-});
+const listQuerySchema = z
+  .object({
+    search: z.string().optional(),
+    status: z.nativeEnum(OrderStatus).optional(),
+    dateFrom: z.string().optional(),
+    dateTo: z.string().optional(),
+    page: z.coerce.number().int().positive().optional(),
+  })
+  // Rejects an inverted range outright rather than silently matching zero
+  // rows (gte dateFrom AND lte dateTo can never both hold when
+  // dateFrom > dateTo) — the date pickers already prevent this in the UI
+  // via min/max, this is the backstop for any other caller.
+  .refine((q) => !q.dateFrom || !q.dateTo || q.dateFrom <= q.dateTo, {
+    message: "dateFrom must not be after dateTo",
+    path: ["dateFrom"],
+  });
 
 ordersRouter.get("/", async (req, res, next) => {
   try {

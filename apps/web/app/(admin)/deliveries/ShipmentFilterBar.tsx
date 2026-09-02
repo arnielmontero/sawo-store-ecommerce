@@ -67,6 +67,7 @@ export function ShipmentFilterBar({
           <input
             type="date"
             value={dateFrom}
+            max={dateTo || undefined}
             onChange={(e) => onDateFromChange(e.target.value)}
             className="rounded-md border border-ink-100 bg-gray-50 px-3 py-1.5 text-sm outline-none focus:border-brand-500 focus:bg-white focus:ring-1 focus:ring-brand-500"
           />
@@ -74,6 +75,7 @@ export function ShipmentFilterBar({
           <input
             type="date"
             value={dateTo}
+            min={dateFrom || undefined}
             onChange={(e) => onDateToChange(e.target.value)}
             className="rounded-md border border-ink-100 bg-gray-50 px-3 py-1.5 text-sm outline-none focus:border-brand-500 focus:bg-white focus:ring-1 focus:ring-brand-500"
           />
