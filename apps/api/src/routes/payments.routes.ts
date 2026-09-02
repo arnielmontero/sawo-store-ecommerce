@@ -8,11 +8,19 @@ import { createPaymentIntent, handleStripeWebhook, listPayments, refundOrder } f
 
 export const paymentsRouter = Router();
 
+const listQuerySchema = z.object({
+  search: z.string().optional(),
+  sortBy: z.enum(["createdAt", "totalCents", "paymentAttemptCount"]).optional(),
+  sortDir: z.enum(["asc", "desc"]).optional(),
+  page: z.coerce.number().int().positive().optional(),
+});
+
 // Admin only — list of orders that have gone through payment processing.
-paymentsRouter.get("/", requireAuth, requireRole(AdminRole.ADMIN, AdminRole.FULFILLMENT_STAFF), async (_req, res, next) => {
+paymentsRouter.get("/", requireAuth, requireRole(AdminRole.ADMIN, AdminRole.FULFILLMENT_STAFF), async (req, res, next) => {
   try {
-    const payments = await listPayments();
-    res.json({ payments });
+    const filters = listQuerySchema.parse(req.query);
+    const result = await listPayments(filters);
+    res.json(result);
   } catch (err) {
     next(err);
   }

@@ -1,5 +1,5 @@
 import Stripe from "stripe";
-import { OrderStatus, StockAdjustmentReason } from "@prisma/client";
+import { OrderStatus, Prisma, StockAdjustmentReason } from "@prisma/client";
 import { prisma } from "../lib/prisma";
 import { getStripe } from "../lib/stripe";
 import { HttpError } from "../middleware/errorHandler";
@@ -122,25 +122,63 @@ export async function handleStripeWebhook(rawBody: Buffer, signature: string, we
   await prisma.processedWebhookEvent.create({ data: { id: event.id, type: event.type } });
 }
 
+const PAGE_SIZE = 20;
+
+export type PaymentSortField = "createdAt" | "totalCents" | "paymentAttemptCount";
+
+export interface ListPaymentsFilters {
+  search?: string;
+  sortBy?: PaymentSortField;
+  sortDir?: "asc" | "desc";
+  page?: number;
+}
+
 // Admin payments view — orders that have actually gone through payment
 // processing (a PaymentIntent was created), so PENDING orders that never
 // got as far as checkout's payment step don't clutter the list.
-export async function listPayments() {
-  return prisma.order.findMany({
-    where: { stripePaymentIntentId: { not: null } },
-    select: {
-      id: true,
-      reference: true,
-      status: true,
-      paymentMethod: true,
-      totalCents: true,
-      currency: true,
-      stripePaymentIntentId: true,
-      paymentAttemptCount: true,
-      createdAt: true,
-    },
-    orderBy: { createdAt: "desc" },
-  });
+export async function listPayments(filters: ListPaymentsFilters = {}) {
+  const page = filters.page && filters.page > 0 ? filters.page : 1;
+  const sortBy = filters.sortBy ?? "createdAt";
+  const sortDir = filters.sortDir === "asc" ? "asc" : "desc";
+
+  const where: Prisma.OrderWhereInput = {
+    stripePaymentIntentId: { not: null },
+    ...(filters.search
+      ? {
+          OR: [
+            { reference: { contains: filters.search } },
+            { stripePaymentIntentId: { contains: filters.search } },
+            { user: { email: { contains: filters.search } } },
+          ],
+        }
+      : {}),
+  };
+
+  const [payments, total] = await Promise.all([
+    prisma.order.findMany({
+      where,
+      select: {
+        id: true,
+        reference: true,
+        status: true,
+        paymentMethod: true,
+        totalCents: true,
+        currency: true,
+        stripePaymentIntentId: true,
+        paymentAttemptCount: true,
+        createdAt: true,
+      },
+      orderBy: { [sortBy]: sortDir },
+      skip: (page - 1) * PAGE_SIZE,
+      take: PAGE_SIZE,
+    }),
+    prisma.order.count({ where }),
+  ]);
+
+  return {
+    payments,
+    pagination: { page, pageSize: PAGE_SIZE, total, totalPages: Math.ceil(total / PAGE_SIZE) },
+  };
 }
 
 export interface RefundInput {

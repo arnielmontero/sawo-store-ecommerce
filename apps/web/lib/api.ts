@@ -353,6 +353,8 @@ export interface OrderDetail {
   carrier: string | null;
   isNewClient: boolean;
   trackingNumber: string | null;
+  deliveryStatus: string | null;
+  easypostTrackingUrl: string | null;
   stripePaymentIntentId: string | null;
   paymentAttemptCount: number;
   createdAt: string;
@@ -397,6 +399,13 @@ export interface Payment {
   stripePaymentIntentId: string | null;
   paymentAttemptCount: number;
   createdAt: string;
+}
+
+export type PaymentSortField = "createdAt" | "totalCents" | "paymentAttemptCount";
+
+export interface PaymentsPage {
+  payments: Payment[];
+  pagination: { page: number; pageSize: number; total: number; totalPages: number };
 }
 
 // The access token lives only in memory (module-level variable), never in
@@ -844,9 +853,21 @@ export async function setPaymentMethodRules(country: string, methods: PaymentMet
   return data.rules;
 }
 
-export async function fetchPayments(): Promise<Payment[]> {
-  const data = await apiFetch("/api/v1/payments");
-  return data.payments;
+export async function fetchPayments(
+  params: {
+    search?: string;
+    sortBy?: PaymentSortField;
+    sortDir?: SortDir;
+    page?: number;
+  } = {}
+): Promise<PaymentsPage> {
+  const query = new URLSearchParams();
+  if (params.search) query.set("search", params.search);
+  if (params.sortBy) query.set("sortBy", params.sortBy);
+  if (params.sortDir) query.set("sortDir", params.sortDir);
+  if (params.page) query.set("page", String(params.page));
+  const qs = query.toString();
+  return apiFetch(`/api/v1/payments${qs ? `?${qs}` : ""}`);
 }
 
 // The endpoint always returns the full OrderDetail shape (via getOrderById

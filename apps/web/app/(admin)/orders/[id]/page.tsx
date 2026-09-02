@@ -11,6 +11,7 @@ import { useStoreSettings } from "@/lib/store-settings-context";
 import { NEXT_STATES, ACTION_LABELS, STATUS_HISTORY_LABELS } from "@/lib/orderStateMachine";
 import { RefundPanel } from "@/components/RefundPanel";
 import { ReturnRequestsCard } from "@/components/ReturnRequestsCard";
+import { DeliveryProgress } from "@/components/DeliveryProgress";
 
 export default function OrderDetailPage() {
   const params = useParams<{ id: string }>();
@@ -274,6 +275,29 @@ export default function OrderDetailPage() {
                 )}
                 {order.carrier && <p className="mt-1 text-sm text-ink-900">{order.carrier}</p>}
               </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {order.trackingNumber && (
+        <div className="mt-6 rounded-xl border border-ink-100 bg-white p-5">
+          <div className="flex items-center justify-between gap-4">
+            <div>
+              <p className="text-xs uppercase tracking-wide text-ink-500">Delivery tracking</p>
+              <div className="mt-2">
+                <DeliveryProgress status={order.deliveryStatus} />
+              </div>
+            </div>
+            {order.easypostTrackingUrl && (
+              <a
+                href={order.easypostTrackingUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="shrink-0 text-sm font-medium text-brand-600 hover:underline"
+              >
+                View tracking →
+              </a>
             )}
           </div>
         </div>
