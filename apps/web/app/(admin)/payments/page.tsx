@@ -2,9 +2,18 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { fetchPayments, refundPayment, type Payment, type PaymentSortField, type SortDir } from "@/lib/api";
+import {
+  fetchPayments,
+  refundPayment,
+  type Payment,
+  type PaymentSortField,
+  type SortDir,
+  type PaymentMethod,
+  type OrderStatus,
+} from "@/lib/api";
 import { formatCents, formatPaymentMethod } from "@/lib/format";
 import { StatusBadge } from "@/components/StatusBadge";
+import { MultiSelectDropdown } from "@/components/MultiSelectDropdown";
 import { useAuth } from "@/lib/auth-context";
 
 const SORTABLE_COLUMNS: { field: PaymentSortField; label: string }[] = [
@@ -13,12 +22,31 @@ const SORTABLE_COLUMNS: { field: PaymentSortField; label: string }[] = [
   { field: "paymentAttemptCount", label: "Attempts" },
 ];
 
+const METHOD_OPTIONS: { value: PaymentMethod; label: string }[] = [
+  { value: "CARD", label: "Card" },
+  { value: "BANK", label: "Bank" },
+  { value: "PAYPAL", label: "PayPal" },
+  { value: "PAY_WITH_CHECK", label: "Pay with Check" },
+];
+
+const STATUS_OPTIONS: { value: OrderStatus; label: string }[] = [
+  { value: "PAID", label: "Paid" },
+  { value: "SHIPPED", label: "Shipped" },
+  { value: "DELIVERED", label: "Delivered" },
+  { value: "CANCELLED", label: "Cancelled" },
+  { value: "REFUNDED", label: "Refunded" },
+  { value: "PARTIALLY_REFUNDED", label: "Partially Refunded" },
+  { value: "RETURNED", label: "Returned" },
+];
+
 export default function PaymentsPage() {
   const { user } = useAuth();
   const [payments, setPayments] = useState<Payment[]>([]);
   const [pagination, setPagination] = useState({ page: 1, pageSize: 20, total: 0, totalPages: 1 });
   const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
+  const [methodFilter, setMethodFilter] = useState<PaymentMethod[]>([]);
+  const [statusFilter, setStatusFilter] = useState<OrderStatus[]>([]);
   const [page, setPage] = useState(1);
   const [sortBy, setSortBy] = useState<PaymentSortField>("createdAt");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
@@ -38,7 +66,14 @@ export default function PaymentsPage() {
 
   function load() {
     setLoading(true);
-    fetchPayments({ search: search || undefined, sortBy, sortDir, page })
+    fetchPayments({
+      search: search || undefined,
+      paymentMethod: methodFilter.length > 0 ? methodFilter : undefined,
+      status: statusFilter.length > 0 ? statusFilter : undefined,
+      sortBy,
+      sortDir,
+      page,
+    })
       .then((result) => {
         setPayments(result.payments);
         setPagination(result.pagination);
@@ -47,7 +82,15 @@ export default function PaymentsPage() {
       .finally(() => setLoading(false));
   }
 
-  useEffect(load, [search, sortBy, sortDir, page]);
+  useEffect(load, [search, methodFilter, statusFilter, sortBy, sortDir, page]);
+
+  const hasFilters = methodFilter.length > 0 || statusFilter.length > 0;
+
+  function clearFilters() {
+    setMethodFilter([]);
+    setStatusFilter([]);
+    setPage(1);
+  }
 
   function handleSort(field: PaymentSortField) {
     if (sortBy === field) {
@@ -100,13 +143,42 @@ export default function PaymentsPage() {
           />
         </div>
 
+        <div className="flex flex-wrap items-center gap-2 border-b border-ink-100 px-5 py-3">
+          <MultiSelectDropdown
+            label="All methods"
+            options={METHOD_OPTIONS}
+            selected={methodFilter}
+            onChange={(next) => {
+              setMethodFilter(next);
+              setPage(1);
+            }}
+          />
+          <MultiSelectDropdown
+            label="All statuses"
+            options={STATUS_OPTIONS}
+            selected={statusFilter}
+            onChange={(next) => {
+              setStatusFilter(next);
+              setPage(1);
+            }}
+          />
+          {hasFilters && (
+            <button
+              onClick={clearFilters}
+              className="rounded-md px-3 py-1.5 text-sm font-medium text-ink-500 hover:bg-gray-50 hover:text-ink-900"
+            >
+              Clear filters
+            </button>
+          )}
+        </div>
+
         {error ? (
           <p className="px-5 py-8 text-center text-sm text-brand-600">{error}</p>
         ) : loading ? (
           <p className="px-5 py-8 text-center text-sm text-ink-500">Loading...</p>
         ) : payments.length === 0 ? (
           <p className="px-5 py-8 text-center text-sm text-ink-500">
-            {search ? "No payments match your search." : "No payments yet."}
+            {search || hasFilters ? "No payments match your search or filters." : "No payments yet."}
           </p>
         ) : (
           <div className="overflow-x-auto">

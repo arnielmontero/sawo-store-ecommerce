@@ -856,6 +856,8 @@ export async function setPaymentMethodRules(country: string, methods: PaymentMet
 export async function fetchPayments(
   params: {
     search?: string;
+    paymentMethod?: PaymentMethod[];
+    status?: OrderStatus[];
     sortBy?: PaymentSortField;
     sortDir?: SortDir;
     page?: number;
@@ -863,6 +865,8 @@ export async function fetchPayments(
 ): Promise<PaymentsPage> {
   const query = new URLSearchParams();
   if (params.search) query.set("search", params.search);
+  for (const method of params.paymentMethod ?? []) query.append("paymentMethod", method);
+  for (const status of params.status ?? []) query.append("status", status);
   if (params.sortBy) query.set("sortBy", params.sortBy);
   if (params.sortDir) query.set("sortDir", params.sortDir);
   if (params.page) query.set("page", String(params.page));

@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { z } from "zod";
-import { AdminRole } from "@prisma/client";
+import { AdminRole, OrderStatus, PaymentMethod } from "@prisma/client";
 import { requireAuth, requireRole } from "../middleware/requireAuth";
 import { HttpError } from "../middleware/errorHandler";
 import { getStripeWebhookSecret } from "../lib/credentials";
@@ -8,8 +8,16 @@ import { createPaymentIntent, handleStripeWebhook, listPayments, refundOrder } f
 
 export const paymentsRouter = Router();
 
+// Checkbox dropdowns in the admin UI send repeated query params for a
+// multi-select (?paymentMethod=CARD&paymentMethod=BANK) — coerce a single
+// value into a one-element array so both cases parse the same way.
+const toArray = <T extends z.ZodTypeAny>(schema: T) =>
+  z.preprocess((val) => (val === undefined ? undefined : Array.isArray(val) ? val : [val]), z.array(schema)).optional();
+
 const listQuerySchema = z.object({
   search: z.string().optional(),
+  paymentMethod: toArray(z.nativeEnum(PaymentMethod)),
+  status: toArray(z.nativeEnum(OrderStatus)),
   sortBy: z.enum(["createdAt", "totalCents", "paymentAttemptCount"]).optional(),
   sortDir: z.enum(["asc", "desc"]).optional(),
   page: z.coerce.number().int().positive().optional(),

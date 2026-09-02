@@ -1,5 +1,5 @@
 import Stripe from "stripe";
-import { OrderStatus, Prisma, StockAdjustmentReason } from "@prisma/client";
+import { OrderStatus, PaymentMethod, Prisma, StockAdjustmentReason } from "@prisma/client";
 import { prisma } from "../lib/prisma";
 import { getStripe } from "../lib/stripe";
 import { HttpError } from "../middleware/errorHandler";
@@ -128,6 +128,10 @@ export type PaymentSortField = "createdAt" | "totalCents" | "paymentAttemptCount
 
 export interface ListPaymentsFilters {
   search?: string;
+  // Multiple values = OR'd together (e.g. "Card or Bank"), matching the
+  // multi-select checkbox dropdown in the admin UI.
+  paymentMethod?: PaymentMethod[];
+  status?: OrderStatus[];
   sortBy?: PaymentSortField;
   sortDir?: "asc" | "desc";
   page?: number;
@@ -143,6 +147,10 @@ export async function listPayments(filters: ListPaymentsFilters = {}) {
 
   const where: Prisma.OrderWhereInput = {
     stripePaymentIntentId: { not: null },
+    ...(filters.paymentMethod && filters.paymentMethod.length > 0
+      ? { paymentMethod: { in: filters.paymentMethod } }
+      : {}),
+    ...(filters.status && filters.status.length > 0 ? { status: { in: filters.status } } : {}),
     ...(filters.search
       ? {
           OR: [
