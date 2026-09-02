@@ -25,6 +25,8 @@ const listQuerySchema = z.object({
   search: z.string().optional(),
   carrier: toArraySchema.optional(),
   country: toArraySchema.optional(),
+  dateFrom: z.string().optional(),
+  dateTo: z.string().optional(),
   sortBy: z.enum(["createdAt", "paidAt", "updatedAt", "totalCents"]).optional(),
   sortDir: z.enum(["asc", "desc"]).optional(),
   page: z.coerce.number().int().positive().optional(),
@@ -43,6 +45,8 @@ shippingRouter.get("/", async (req, res, next) => {
       search: q.search,
       carrier: q.carrier,
       country: q.country,
+      dateFrom: q.dateFrom,
+      dateTo: q.dateTo,
       sortBy: q.sortBy,
       sortDir: q.sortDir,
       page: q.page,
@@ -54,12 +58,18 @@ shippingRouter.get("/", async (req, res, next) => {
 });
 
 // Exports the same filtered set the on-screen tab would show (minus
-// pagination) — reuses listQuerySchema so search/carrier/country filters
-// behave identically between the list and its export.
+// pagination) — reuses listQuerySchema so search/carrier/country/date
+// filters behave identically between the list and its export.
 shippingRouter.get("/export", async (req, res, next) => {
   try {
     const q = listQuerySchema.omit({ page: true }).parse(req.query);
-    const csv = await exportShipmentsCsv(q.tab, { search: q.search, carrier: q.carrier, country: q.country });
+    const csv = await exportShipmentsCsv(q.tab, {
+      search: q.search,
+      carrier: q.carrier,
+      country: q.country,
+      dateFrom: q.dateFrom,
+      dateTo: q.dateTo,
+    });
     res.setHeader("Content-Type", "text/csv");
     res.setHeader("Content-Disposition", `attachment; filename="deliveries-${q.tab}-export.csv"`);
     res.send(csv);

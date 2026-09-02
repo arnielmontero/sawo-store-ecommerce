@@ -17,6 +17,10 @@ export function ShipmentFilterBar({
   onCarrierChange,
   country,
   onCountryChange,
+  dateFrom,
+  onDateFromChange,
+  dateTo,
+  onDateToChange,
   hasFilters,
   onClearFilters,
   onExport,
@@ -28,6 +32,10 @@ export function ShipmentFilterBar({
   onCarrierChange: (next: string[]) => void;
   country: string[];
   onCountryChange: (next: string[]) => void;
+  dateFrom: string;
+  onDateFromChange: (value: string) => void;
+  dateTo: string;
+  onDateToChange: (value: string) => void;
   hasFilters: boolean;
   onClearFilters: () => void;
   onExport: () => void;
@@ -54,6 +62,22 @@ export function ShipmentFilterBar({
       <div className="flex flex-wrap items-center gap-2 border-b border-ink-100 px-5 py-3">
         <MultiSelectDropdown label="All carriers" options={CARRIER_FILTER_OPTIONS} selected={carrier} onChange={onCarrierChange} />
         <MultiSelectDropdown label="All countries" options={COUNTRY_OPTIONS} selected={country} onChange={onCountryChange} />
+        <div className="flex items-center gap-1.5 text-sm text-ink-500">
+          <span>From</span>
+          <input
+            type="date"
+            value={dateFrom}
+            onChange={(e) => onDateFromChange(e.target.value)}
+            className="rounded-md border border-ink-100 bg-gray-50 px-3 py-1.5 text-sm outline-none focus:border-brand-500 focus:bg-white focus:ring-1 focus:ring-brand-500"
+          />
+          <span>to</span>
+          <input
+            type="date"
+            value={dateTo}
+            onChange={(e) => onDateToChange(e.target.value)}
+            className="rounded-md border border-ink-100 bg-gray-50 px-3 py-1.5 text-sm outline-none focus:border-brand-500 focus:bg-white focus:ring-1 focus:ring-brand-500"
+          />
+        </div>
         {hasFilters && (
           <button
             onClick={onClearFilters}

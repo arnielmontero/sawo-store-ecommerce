@@ -832,6 +832,8 @@ export async function fetchShipments(
     search?: string;
     carrier?: string[];
     country?: string[];
+    dateFrom?: string;
+    dateTo?: string;
     sortBy?: ShipmentSortField;
     sortDir?: SortDir;
     page?: number;
@@ -841,6 +843,8 @@ export async function fetchShipments(
   if (params.search) query.set("search", params.search);
   for (const c of params.carrier ?? []) query.append("carrier", c);
   for (const c of params.country ?? []) query.append("country", c);
+  if (params.dateFrom) query.set("dateFrom", params.dateFrom);
+  if (params.dateTo) query.set("dateTo", params.dateTo);
   if (params.sortBy) query.set("sortBy", params.sortBy);
   if (params.sortDir) query.set("sortDir", params.sortDir);
   if (params.page) query.set("page", String(params.page));
@@ -848,16 +852,18 @@ export async function fetchShipments(
 }
 
 // Exports whatever the given Deliveries tab is currently filtered to
-// (search/carrier/country) — omit filter params for the full unfiltered
-// export of that tab.
+// (search/carrier/country/date range) — omit filter params for the full
+// unfiltered export of that tab.
 export async function exportShipmentsCsvUrl(
   tab: ShipmentTab,
-  params: { search?: string; carrier?: string[]; country?: string[] } = {}
+  params: { search?: string; carrier?: string[]; country?: string[]; dateFrom?: string; dateTo?: string } = {}
 ): Promise<string> {
   const query = new URLSearchParams({ tab });
   if (params.search) query.set("search", params.search);
   for (const c of params.carrier ?? []) query.append("carrier", c);
   for (const c of params.country ?? []) query.append("country", c);
+  if (params.dateFrom) query.set("dateFrom", params.dateFrom);
+  if (params.dateTo) query.set("dateTo", params.dateTo);
   const res = await fetch(`${API_URL}/api/v1/shipping/export?${query.toString()}`, {
     credentials: "include",
     headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : {},

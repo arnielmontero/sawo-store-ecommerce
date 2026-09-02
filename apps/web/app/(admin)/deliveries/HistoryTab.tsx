@@ -23,6 +23,8 @@ export function HistoryTab() {
   const [search, setSearch] = useState("");
   const [carrierFilter, setCarrierFilter] = useState<string[]>([]);
   const [countryFilter, setCountryFilter] = useState<string[]>([]);
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
   const [page, setPage] = useState(1);
   const [sortBy, setSortBy] = useState<ShipmentSortField>("updatedAt");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
@@ -43,6 +45,8 @@ export function HistoryTab() {
       search: search || undefined,
       carrier: carrierFilter.length > 0 ? carrierFilter : undefined,
       country: countryFilter.length > 0 ? countryFilter : undefined,
+      dateFrom: dateFrom || undefined,
+      dateTo: dateTo || undefined,
       sortBy,
       sortDir,
       page,
@@ -55,13 +59,15 @@ export function HistoryTab() {
       .finally(() => setLoading(false));
   }
 
-  useEffect(load, [search, carrierFilter, countryFilter, sortBy, sortDir, page]);
+  useEffect(load, [search, carrierFilter, countryFilter, dateFrom, dateTo, sortBy, sortDir, page]);
 
-  const hasFilters = carrierFilter.length > 0 || countryFilter.length > 0;
+  const hasFilters = carrierFilter.length > 0 || countryFilter.length > 0 || Boolean(dateFrom) || Boolean(dateTo);
 
   function clearFilters() {
     setCarrierFilter([]);
     setCountryFilter([]);
+    setDateFrom("");
+    setDateTo("");
     setPage(1);
   }
 
@@ -85,6 +91,8 @@ export function HistoryTab() {
       search: search || undefined,
       carrier: carrierFilter.length > 0 ? carrierFilter : undefined,
       country: countryFilter.length > 0 ? countryFilter : undefined,
+      dateFrom: dateFrom || undefined,
+      dateTo: dateTo || undefined,
     });
     const a = document.createElement("a");
     a.href = url;
@@ -110,6 +118,16 @@ export function HistoryTab() {
         country={countryFilter}
         onCountryChange={(next) => {
           setCountryFilter(next);
+          setPage(1);
+        }}
+        dateFrom={dateFrom}
+        onDateFromChange={(value) => {
+          setDateFrom(value);
+          setPage(1);
+        }}
+        dateTo={dateTo}
+        onDateToChange={(value) => {
+          setDateTo(value);
           setPage(1);
         }}
         hasFilters={hasFilters}

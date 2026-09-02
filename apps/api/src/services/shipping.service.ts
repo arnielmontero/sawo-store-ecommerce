@@ -18,6 +18,11 @@ export interface ListShipmentsFilters {
   // dropdowns in the admin UI (same convention as payment.service.ts).
   carrier?: string[];
   country?: string[];
+  // Inclusive date range on createdAt (when the order was placed) — same
+  // field and semantics as order.service.ts's ListOrdersFilters, so a date
+  // range means the same thing here as it does on the Orders page.
+  dateFrom?: string;
+  dateTo?: string;
   sortBy?: ShipmentSortField;
   sortDir?: "asc" | "desc";
   page?: number;
@@ -38,6 +43,18 @@ function buildShipmentsWhere(tab: ShipmentTab, filters: ListShipmentsFilters): P
     ...base,
     ...(filters.carrier && filters.carrier.length > 0 ? { carrier: { in: filters.carrier } } : {}),
     ...(filters.country && filters.country.length > 0 ? { shippingCountry: { in: filters.country } } : {}),
+    ...(filters.dateFrom || filters.dateTo
+      ? {
+          createdAt: {
+            ...(filters.dateFrom ? { gte: new Date(filters.dateFrom) } : {}),
+            // dateTo is a calendar date from a date-picker (no time
+            // component) — push it to the end of that day so "to 2026-09-01"
+            // includes orders placed during that day, not only before
+            // midnight. Matches order.service.ts's buildOrdersWhere.
+            ...(filters.dateTo ? { lte: new Date(`${filters.dateTo}T23:59:59.999`) } : {}),
+          },
+        }
+      : {}),
     ...(filters.search
       ? {
           OR: [
