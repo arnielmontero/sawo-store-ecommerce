@@ -220,6 +220,7 @@ export default function PaymentsPage() {
                       {payment.stripePaymentIntentId ?? "—"}
                     </td>
                     <td className="px-3 py-3 text-ink-700">{formatPaymentMethod(payment.paymentMethod)}</td>
+                    <td className="px-3 py-3 text-ink-700">{new Date(payment.createdAt).toLocaleDateString()}</td>
                     <td className="px-3 py-3 text-ink-700">
                       {formatCents(payment.totalCents, payment.currency)}
                     </td>
