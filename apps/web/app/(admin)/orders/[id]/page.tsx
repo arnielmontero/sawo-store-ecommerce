@@ -8,7 +8,7 @@ import { formatCents, formatPaymentMethod } from "@/lib/format";
 import { StatusBadge } from "@/components/StatusBadge";
 import { useAuth } from "@/lib/auth-context";
 import { useStoreSettings } from "@/lib/store-settings-context";
-import { NEXT_STATES, ACTION_LABELS, STATUS_HISTORY_LABELS } from "@/lib/orderStateMachine";
+import { NEXT_STATES, ACTION_LABELS, STATUS_HISTORY_LABELS, HAPPY_PATH_STATUSES } from "@/lib/orderStateMachine";
 import { RefundPanel } from "@/components/RefundPanel";
 import { ReturnRequestsCard } from "@/components/ReturnRequestsCard";
 import { DeliveryProgress } from "@/components/DeliveryProgress";
@@ -86,6 +86,24 @@ export default function OrderDetailPage() {
 
   const canStaffAct = !readOnly && (user?.role === "ADMIN" || user?.role === "FULFILLMENT_STAFF");
   const canReviewReturns = !readOnly && user?.role === "ADMIN";
+
+  // Fixed happy-path roadmap (Placed -> Paid -> Shipped -> Delivered) so a
+  // step not yet reached still gets a slot in the timeline, shown greyed out
+  // rather than simply missing. If the order branched off the happy path
+  // (Cancelled/Refunded/Returned/PartiallyRefunded), the roadmap stops at
+  // wherever it left off and that branch event is appended as the final,
+  // highlighted step — matching what actually happened instead of implying
+  // the order is still headed toward Delivered.
+  const historyByStatus = new Map(order.statusHistory.map((entry) => [entry.status, entry]));
+  const branchEntry = order.statusHistory.find((entry) => !HAPPY_PATH_STATUSES.includes(entry.status));
+  const timelineSteps = [
+    ...HAPPY_PATH_STATUSES.filter((status) => !branchEntry || historyByStatus.has(status)).map((status) => ({
+      status,
+      changedAt: historyByStatus.get(status)?.changedAt ?? null,
+      reached: historyByStatus.has(status),
+    })),
+    ...(branchEntry ? [{ status: branchEntry.status, changedAt: branchEntry.changedAt, reached: true }] : []),
+  ];
 
   return (
     <div>
@@ -174,27 +192,35 @@ export default function OrderDetailPage() {
             <p className="text-sm text-ink-500">No status history recorded.</p>
           ) : (
             <ol className="space-y-4">
-              {order.statusHistory.map((entry, i) => (
-                <li key={entry.id} className="flex gap-3">
-                  <div className="flex flex-col items-center">
-                    <span
-                      className={`h-2.5 w-2.5 shrink-0 rounded-full ${
-                        i === order.statusHistory.length - 1 ? "bg-brand-500" : "bg-ink-300"
-                      }`}
-                    />
-                    {i < order.statusHistory.length - 1 && <span className="mt-1 w-px flex-1 bg-ink-100" />}
-                  </div>
-                  <div className="pb-1">
-                    <p className="text-sm font-medium text-ink-900">{STATUS_HISTORY_LABELS[entry.status]}</p>
-                    <p className="text-xs text-ink-500">
-                      {new Date(entry.changedAt).toLocaleString(undefined, {
-                        dateStyle: "medium",
-                        timeStyle: "short",
-                      })}
-                    </p>
-                  </div>
-                </li>
-              ))}
+              {timelineSteps.map((step, i) => {
+                const isLastStep = i === timelineSteps.length - 1;
+                const isCurrent = step.reached && (isLastStep || !timelineSteps[i + 1].reached);
+                return (
+                  <li key={step.status} className="flex gap-3">
+                    <div className="flex flex-col items-center">
+                      <span
+                        className={`h-2.5 w-2.5 shrink-0 rounded-full ${
+                          !step.reached ? "bg-ink-100" : isCurrent ? "bg-brand-500" : "bg-ink-300"
+                        }`}
+                      />
+                      {!isLastStep && <span className="mt-1 w-px flex-1 bg-ink-100" />}
+                    </div>
+                    <div className="pb-1">
+                      <p className={`text-sm font-medium ${step.reached ? "text-ink-900" : "text-ink-400"}`}>
+                        {STATUS_HISTORY_LABELS[step.status]}
+                      </p>
+                      <p className="text-xs text-ink-500">
+                        {step.changedAt
+                          ? new Date(step.changedAt).toLocaleString(undefined, {
+                              dateStyle: "medium",
+                              timeStyle: "short",
+                            })
+                          : "Not yet reached"}
+                      </p>
+                    </div>
+                  </li>
+                );
+              })}
             </ol>
           )}
         </div>

@@ -43,3 +43,9 @@ export const STATUS_HISTORY_LABELS: Record<OrderStatus, string> = {
   RETURNED: "Order returned",
   PARTIALLY_REFUNDED: "Order partially refunded",
 };
+
+// The order lifecycle's happy path, in order — used to render the Timeline
+// as a fixed roadmap (so "Order delivered" always has a slot even before it
+// happens) instead of a variable-length list that only shows whatever
+// statusHistory rows exist so far.
+export const HAPPY_PATH_STATUSES: OrderStatus[] = ["PENDING", "PAID", "SHIPPED", "DELIVERED"];
