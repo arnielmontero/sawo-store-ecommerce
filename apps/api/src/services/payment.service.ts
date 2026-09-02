@@ -6,6 +6,7 @@ import { HttpError } from "../middleware/errorHandler";
 import { getOrderById, setOrderStatus, updateOrderStatus } from "./order.service";
 import { restockCommittedStock } from "./inventory.service";
 import { getStoreSettings } from "./settings.service";
+import { toXlsx } from "../lib/xlsx";
 
 // Creates (or reuses, on retry) a Stripe PaymentIntent for an order.
 //
@@ -132,25 +133,38 @@ export interface ListPaymentsFilters {
   // multi-select checkbox dropdown in the admin UI.
   paymentMethod?: PaymentMethod[];
   status?: OrderStatus[];
+  // Inclusive date range on createdAt — same field and semantics as
+  // order.service.ts's ListOrdersFilters/shipping.service.ts's
+  // ListShipmentsFilters.
+  dateFrom?: string;
+  dateTo?: string;
   sortBy?: PaymentSortField;
   sortDir?: "asc" | "desc";
   page?: number;
 }
 
-// Admin payments view — orders that have actually gone through payment
-// processing (a PaymentIntent was created), so PENDING orders that never
-// got as far as checkout's payment step don't clutter the list.
-export async function listPayments(filters: ListPaymentsFilters = {}) {
-  const page = filters.page && filters.page > 0 ? filters.page : 1;
-  const sortBy = filters.sortBy ?? "createdAt";
-  const sortDir = filters.sortDir === "asc" ? "asc" : "desc";
-
-  const where: Prisma.OrderWhereInput = {
+// Shared by listPayments and exportPaymentsCsv so an export always matches
+// exactly what's on screen, minus pagination — same pattern as
+// order.service.ts's buildOrdersWhere.
+function buildPaymentsWhere(filters: ListPaymentsFilters): Prisma.OrderWhereInput {
+  return {
     stripePaymentIntentId: { not: null },
     ...(filters.paymentMethod && filters.paymentMethod.length > 0
       ? { paymentMethod: { in: filters.paymentMethod } }
       : {}),
     ...(filters.status && filters.status.length > 0 ? { status: { in: filters.status } } : {}),
+    ...(filters.dateFrom || filters.dateTo
+      ? {
+          createdAt: {
+            ...(filters.dateFrom ? { gte: new Date(filters.dateFrom) } : {}),
+            // dateTo is a calendar date from a date-picker (no time
+            // component) — push it to the end of that day so "to
+            // 2026-09-01" includes payments made during that day, not only
+            // before midnight. Matches order.service.ts's buildOrdersWhere.
+            ...(filters.dateTo ? { lte: new Date(`${filters.dateTo}T23:59:59.999`) } : {}),
+          },
+        }
+      : {}),
     ...(filters.search
       ? {
           OR: [
@@ -161,21 +175,33 @@ export async function listPayments(filters: ListPaymentsFilters = {}) {
         }
       : {}),
   };
+}
+
+const PAYMENT_SELECT = {
+  id: true,
+  reference: true,
+  status: true,
+  paymentMethod: true,
+  totalCents: true,
+  currency: true,
+  stripePaymentIntentId: true,
+  paymentAttemptCount: true,
+  createdAt: true,
+} satisfies Prisma.OrderSelect;
+
+// Admin payments view — orders that have actually gone through payment
+// processing (a PaymentIntent was created), so PENDING orders that never
+// got as far as checkout's payment step don't clutter the list.
+export async function listPayments(filters: ListPaymentsFilters = {}) {
+  const page = filters.page && filters.page > 0 ? filters.page : 1;
+  const sortBy = filters.sortBy ?? "createdAt";
+  const sortDir = filters.sortDir === "asc" ? "asc" : "desc";
+  const where = buildPaymentsWhere(filters);
 
   const [payments, total] = await Promise.all([
     prisma.order.findMany({
       where,
-      select: {
-        id: true,
-        reference: true,
-        status: true,
-        paymentMethod: true,
-        totalCents: true,
-        currency: true,
-        stripePaymentIntentId: true,
-        paymentAttemptCount: true,
-        createdAt: true,
-      },
+      select: PAYMENT_SELECT,
       orderBy: { [sortBy]: sortDir },
       skip: (page - 1) * PAGE_SIZE,
       take: PAGE_SIZE,
@@ -187,6 +213,30 @@ export async function listPayments(filters: ListPaymentsFilters = {}) {
     payments,
     pagination: { page, pageSize: PAGE_SIZE, total, totalPages: Math.ceil(total / PAGE_SIZE) },
   };
+}
+
+const EXPORT_HEADERS = ["Reference", "Payment ID", "Method", "Amount", "Currency", "Attempts", "Status", "Date"];
+
+// Exports the same filtered set the on-screen list would show (minus
+// pagination) — reuses buildPaymentsWhere so search/method/status/date
+// filters behave identically between the list and its export. Amount and
+// Attempts are real numbers so the sheet stays sortable/summable in Excel.
+export async function exportPaymentsXlsx(filters: ListPaymentsFilters = {}): Promise<Buffer> {
+  const where = buildPaymentsWhere(filters);
+  const payments = await prisma.order.findMany({ where, select: PAYMENT_SELECT, orderBy: { createdAt: "desc" } });
+
+  const rows = payments.map((payment) => [
+    payment.reference,
+    payment.stripePaymentIntentId ?? "",
+    payment.paymentMethod ?? "",
+    payment.totalCents / 100,
+    payment.currency,
+    payment.paymentAttemptCount,
+    payment.status,
+    payment.createdAt.toISOString(),
+  ]);
+
+  return toXlsx(EXPORT_HEADERS, rows, "Payments");
 }
 
 export interface RefundInput {

@@ -92,7 +92,7 @@ export function InTransitTab() {
     });
     const a = document.createElement("a");
     a.href = url;
-    a.download = "deliveries-in-transit-export.csv";
+    a.download = "deliveries-in-transit-export.xlsx";
     a.click();
     URL.revokeObjectURL(url);
   }

@@ -3,7 +3,7 @@ import { prisma } from "../lib/prisma";
 import { getEasypost } from "../lib/easypost";
 import { HttpError } from "../middleware/errorHandler";
 import { updateOrderStatus } from "./order.service";
-import { toCsv } from "../lib/csv";
+import { toXlsx } from "../lib/xlsx";
 import { PAID_STALE_HOURS, SHIPPED_STALE_DAYS } from "../lib/staleOrderThresholds";
 
 const PAGE_SIZE = 20;
@@ -135,9 +135,9 @@ export async function listShipments(tab: ShipmentTab, filters: ListShipmentsFilt
   };
 }
 
-// ── CSV export ────────────────────────────────────────────────────────
+// ── Export ────────────────────────────────────────────────────────────
 
-const SHIPMENT_CSV_HEADERS = [
+const EXPORT_HEADERS = [
   "Reference",
   "Status",
   "Country",
@@ -153,12 +153,13 @@ const SHIPMENT_CSV_HEADERS = [
 
 // Reuses buildShipmentsWhere so an export always matches exactly what the
 // same tab/filters currently show on screen, minus pagination — same
-// convention as order.service.ts's exportOrdersCsv.
-export async function exportShipmentsCsv(tab: ShipmentTab, filters: ListShipmentsFilters = {}): Promise<string> {
+// convention as order.service.ts's exportOrdersXlsx. Total is a real number
+// so the sheet stays sortable/summable in Excel.
+export async function exportShipmentsXlsx(tab: ShipmentTab, filters: ListShipmentsFilters = {}): Promise<Buffer> {
   const where = buildShipmentsWhere(tab, filters);
   const rows = await prisma.order.findMany({ where, select: SHIPMENT_SELECT, orderBy: { createdAt: "desc" } });
 
-  const csvRows = rows.map((order) => {
+  const exportRows = rows.map((order) => {
     const { isOverdue } = computeOverdue(tab, order);
     return [
       order.reference,
@@ -166,7 +167,7 @@ export async function exportShipmentsCsv(tab: ShipmentTab, filters: ListShipment
       order.shippingCountry ?? "",
       order.carrier ?? "",
       order.trackingNumber ?? "",
-      (order.totalCents / 100).toFixed(2),
+      order.totalCents / 100,
       order.currency,
       order.createdAt.toISOString(),
       order.paidAt?.toISOString() ?? "",
@@ -175,7 +176,7 @@ export async function exportShipmentsCsv(tab: ShipmentTab, filters: ListShipment
     ];
   });
 
-  return toCsv(SHIPMENT_CSV_HEADERS, csvRows);
+  return toXlsx(EXPORT_HEADERS, exportRows, "Deliveries");
 }
 
 // ── Summary stats ────────────────────────────────────────────────────

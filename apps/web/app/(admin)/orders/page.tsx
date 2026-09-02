@@ -103,7 +103,7 @@ export default function OrdersPage() {
     });
     const a = document.createElement("a");
     a.href = url;
-    a.download = "orders-export.csv";
+    a.download = "orders-export.xlsx";
     a.click();
     URL.revokeObjectURL(url);
   }
@@ -117,7 +117,7 @@ export default function OrdersPage() {
             onClick={handleExport}
             className="rounded-md border border-ink-100 px-4 py-2 text-sm font-medium text-ink-700 hover:bg-gray-50"
           >
-            Export CSV
+            Export XLSX
           </button>
           {settings?.allowPartialRefunds && (
             <button

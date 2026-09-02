@@ -8,7 +8,7 @@ import { HttpError } from "../middleware/errorHandler";
 import {
   addOrderNote,
   checkout,
-  exportOrdersCsv,
+  exportOrdersXlsx,
   getOrderById,
   getOrdersForUser,
   getOrderStatistics,
@@ -120,10 +120,10 @@ ordersRouter.get("/held", async (_req, res, next) => {
 ordersRouter.get("/export", async (req, res, next) => {
   try {
     const filters = listQuerySchema.parse(req.query);
-    const csv = await exportOrdersCsv(filters);
-    res.setHeader("Content-Type", "text/csv");
-    res.setHeader("Content-Disposition", `attachment; filename="orders-export.csv"`);
-    res.send(csv);
+    const buffer = await exportOrdersXlsx(filters);
+    res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+    res.setHeader("Content-Disposition", `attachment; filename="orders-export.xlsx"`);
+    res.send(buffer);
   } catch (err) {
     next(err);
   }

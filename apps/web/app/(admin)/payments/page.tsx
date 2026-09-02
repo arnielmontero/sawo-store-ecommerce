@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import {
   fetchPayments,
+  exportPaymentsCsvUrl,
   refundPayment,
   type Payment,
   type PaymentSortField,
@@ -47,6 +48,8 @@ export default function PaymentsPage() {
   const [search, setSearch] = useState("");
   const [methodFilter, setMethodFilter] = useState<PaymentMethod[]>([]);
   const [statusFilter, setStatusFilter] = useState<OrderStatus[]>([]);
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
   const [page, setPage] = useState(1);
   const [sortBy, setSortBy] = useState<PaymentSortField>("createdAt");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
@@ -70,6 +73,8 @@ export default function PaymentsPage() {
       search: search || undefined,
       paymentMethod: methodFilter.length > 0 ? methodFilter : undefined,
       status: statusFilter.length > 0 ? statusFilter : undefined,
+      dateFrom: dateFrom || undefined,
+      dateTo: dateTo || undefined,
       sortBy,
       sortDir,
       page,
@@ -82,14 +87,31 @@ export default function PaymentsPage() {
       .finally(() => setLoading(false));
   }
 
-  useEffect(load, [search, methodFilter, statusFilter, sortBy, sortDir, page]);
+  useEffect(load, [search, methodFilter, statusFilter, dateFrom, dateTo, sortBy, sortDir, page]);
 
-  const hasFilters = methodFilter.length > 0 || statusFilter.length > 0;
+  const hasFilters = methodFilter.length > 0 || statusFilter.length > 0 || Boolean(dateFrom) || Boolean(dateTo);
 
   function clearFilters() {
     setMethodFilter([]);
     setStatusFilter([]);
+    setDateFrom("");
+    setDateTo("");
     setPage(1);
+  }
+
+  async function handleExport() {
+    const url = await exportPaymentsCsvUrl({
+      search: search || undefined,
+      paymentMethod: methodFilter.length > 0 ? methodFilter : undefined,
+      status: statusFilter.length > 0 ? statusFilter : undefined,
+      dateFrom: dateFrom || undefined,
+      dateTo: dateTo || undefined,
+    });
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "payments-export.xlsx";
+    a.click();
+    URL.revokeObjectURL(url);
   }
 
   function handleSort(field: PaymentSortField) {
@@ -134,13 +156,21 @@ export default function PaymentsPage() {
       <div className="mt-6 rounded-xl border border-ink-100 bg-white">
         <div className="flex items-center justify-between gap-3 border-b border-ink-100 px-5 py-4">
           <p className="text-sm font-medium text-ink-900">Transactions ({pagination.total})</p>
-          <input
-            type="text"
-            value={searchInput}
-            onChange={(e) => setSearchInput(e.target.value)}
-            placeholder="Search by reference, payment ID, or customer email..."
-            className="w-80 rounded-md border border-ink-100 bg-gray-50 px-3 py-1.5 text-sm outline-none focus:border-brand-500 focus:bg-white focus:ring-1 focus:ring-brand-500"
-          />
+          <div className="flex items-center gap-2">
+            <input
+              type="text"
+              value={searchInput}
+              onChange={(e) => setSearchInput(e.target.value)}
+              placeholder="Search by reference, payment ID, or customer email..."
+              className="w-80 rounded-md border border-ink-100 bg-gray-50 px-3 py-1.5 text-sm outline-none focus:border-brand-500 focus:bg-white focus:ring-1 focus:ring-brand-500"
+            />
+            <button
+              onClick={handleExport}
+              className="shrink-0 rounded-md border border-ink-100 px-4 py-2 text-sm font-medium text-ink-700 hover:bg-gray-50"
+            >
+              Export XLSX
+            </button>
+          </div>
         </div>
 
         <div className="flex flex-wrap items-center gap-2 border-b border-ink-100 px-5 py-3">
@@ -162,6 +192,30 @@ export default function PaymentsPage() {
               setPage(1);
             }}
           />
+          <div className="flex items-center gap-1.5 text-sm text-ink-500">
+            <span>From</span>
+            <input
+              type="date"
+              value={dateFrom}
+              max={dateTo || undefined}
+              onChange={(e) => {
+                setDateFrom(e.target.value);
+                setPage(1);
+              }}
+              className="rounded-md border border-ink-100 bg-gray-50 px-3 py-1.5 text-sm outline-none focus:border-brand-500 focus:bg-white focus:ring-1 focus:ring-brand-500"
+            />
+            <span>to</span>
+            <input
+              type="date"
+              value={dateTo}
+              min={dateFrom || undefined}
+              onChange={(e) => {
+                setDateTo(e.target.value);
+                setPage(1);
+              }}
+              className="rounded-md border border-ink-100 bg-gray-50 px-3 py-1.5 text-sm outline-none focus:border-brand-500 focus:bg-white focus:ring-1 focus:ring-brand-500"
+            />
+          </div>
           {hasFilters && (
             <button
               onClick={clearFilters}

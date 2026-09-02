@@ -4,7 +4,13 @@ import { AdminRole, OrderStatus, PaymentMethod } from "@prisma/client";
 import { requireAuth, requireRole } from "../middleware/requireAuth";
 import { HttpError } from "../middleware/errorHandler";
 import { getStripeWebhookSecret } from "../lib/credentials";
-import { createPaymentIntent, handleStripeWebhook, listPayments, refundOrder } from "../services/payment.service";
+import {
+  createPaymentIntent,
+  exportPaymentsXlsx,
+  handleStripeWebhook,
+  listPayments,
+  refundOrder,
+} from "../services/payment.service";
 
 export const paymentsRouter = Router();
 
@@ -14,14 +20,23 @@ export const paymentsRouter = Router();
 const toArray = <T extends z.ZodTypeAny>(schema: T) =>
   z.preprocess((val) => (val === undefined ? undefined : Array.isArray(val) ? val : [val]), z.array(schema)).optional();
 
-const listQuerySchema = z.object({
-  search: z.string().optional(),
-  paymentMethod: toArray(z.nativeEnum(PaymentMethod)),
-  status: toArray(z.nativeEnum(OrderStatus)),
-  sortBy: z.enum(["createdAt", "totalCents", "paymentAttemptCount"]).optional(),
-  sortDir: z.enum(["asc", "desc"]).optional(),
-  page: z.coerce.number().int().positive().optional(),
-});
+const listQuerySchema = z
+  .object({
+    search: z.string().optional(),
+    paymentMethod: toArray(z.nativeEnum(PaymentMethod)),
+    status: toArray(z.nativeEnum(OrderStatus)),
+    dateFrom: z.string().optional(),
+    dateTo: z.string().optional(),
+    sortBy: z.enum(["createdAt", "totalCents", "paymentAttemptCount"]).optional(),
+    sortDir: z.enum(["asc", "desc"]).optional(),
+    page: z.coerce.number().int().positive().optional(),
+  })
+  // Rejects an inverted range outright rather than silently matching zero
+  // rows — same guard as orders.routes.ts/shipping.routes.ts.
+  .refine((q) => !q.dateFrom || !q.dateTo || q.dateFrom <= q.dateTo, {
+    message: "dateFrom must not be after dateTo",
+    path: ["dateFrom"],
+  });
 
 // Admin only — list of orders that have gone through payment processing.
 paymentsRouter.get("/", requireAuth, requireRole(AdminRole.ADMIN, AdminRole.FULFILLMENT_STAFF), async (req, res, next) => {
@@ -33,6 +48,26 @@ paymentsRouter.get("/", requireAuth, requireRole(AdminRole.ADMIN, AdminRole.FULF
     next(err);
   }
 });
+
+// Exports the same filtered set the on-screen list would show (minus
+// pagination) — reuses listQuerySchema so search/method/status/date filters
+// behave identically between the list and its export.
+paymentsRouter.get(
+  "/export",
+  requireAuth,
+  requireRole(AdminRole.ADMIN, AdminRole.FULFILLMENT_STAFF),
+  async (req, res, next) => {
+    try {
+      const filters = listQuerySchema.parse(req.query);
+      const buffer = await exportPaymentsXlsx(filters);
+      res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+      res.setHeader("Content-Disposition", `attachment; filename="payments-export.xlsx"`);
+      res.send(buffer);
+    } catch (err) {
+      next(err);
+    }
+  }
+);
 
 const intentSchema = z.object({ orderId: z.number().int().positive() });
 

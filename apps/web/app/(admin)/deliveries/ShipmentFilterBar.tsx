@@ -6,7 +6,7 @@ const COUNTRY_OPTIONS = COUNTRIES.map((c) => ({ value: c.code, label: c.name }))
 const CARRIER_FILTER_OPTIONS = CARRIER_OPTIONS.map((c) => ({ value: c, label: c }));
 
 // Shared by all three Deliveries tabs — search box, Carrier/Country
-// multi-select filters, Clear filters, Export CSV. Each tab owns its own
+// multi-select filters, Clear filters, Export XLSX. Each tab owns its own
 // filter state and passes it down here rather than this component holding
 // any state itself, so switching tabs never carries a stale filter over
 // from a different tab's semantics.
@@ -55,7 +55,7 @@ export function ShipmentFilterBar({
           onClick={onExport}
           className="shrink-0 rounded-md border border-ink-100 px-4 py-2 text-sm font-medium text-ink-700 hover:bg-gray-50"
         >
-          Export CSV
+          Export XLSX
         </button>
       </div>
 

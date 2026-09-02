@@ -30,16 +30,22 @@ export const upload = multer({
   },
 });
 
-// Separate instance for CSV import — same disk storage, different
-// mimetype allowlist and a smaller size cap (spreadsheets, not photos).
-const CSV_MIME_TYPES = new Set(["text/csv", "application/vnd.ms-excel", "text/plain"]);
+// Separate instance for spreadsheet import (Catalog's bulk import) — same
+// disk storage, different mimetype allowlist and a smaller size cap
+// (spreadsheets, not photos). application/vnd.ms-excel is kept in the
+// allowlist since some browsers/OSes still report .xlsx files under that
+// legacy Excel mimetype rather than the modern OOXML one.
+const SPREADSHEET_MIME_TYPES = new Set([
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  "application/vnd.ms-excel",
+]);
 
-export const uploadCsv = multer({
+export const uploadSpreadsheet = multer({
   storage,
   limits: { fileSize: 2 * 1024 * 1024 },
   fileFilter: (_req, file, cb) => {
-    if (!CSV_MIME_TYPES.has(file.mimetype) && !file.originalname.toLowerCase().endsWith(".csv")) {
-      cb(new HttpError(400, "Only CSV files are allowed"));
+    if (!SPREADSHEET_MIME_TYPES.has(file.mimetype) && !file.originalname.toLowerCase().endsWith(".xlsx")) {
+      cb(new HttpError(400, "Only Excel (.xlsx) files are allowed"));
       return;
     }
     cb(null, true);

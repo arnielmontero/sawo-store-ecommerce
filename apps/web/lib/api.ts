@@ -712,7 +712,7 @@ export async function bulkAdjustPrice(productIds: number[], percent: number): Pr
 
 // ── CSV import/export ────────────────────────────────────────────────
 
-export async function exportProductsCsvUrl(): Promise<string> {
+export async function exportProductsXlsxUrl(): Promise<string> {
   const res = await fetch(`${API_URL}/api/v1/products/admin/export`, {
     credentials: "include",
     headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : {},
@@ -722,7 +722,7 @@ export async function exportProductsCsvUrl(): Promise<string> {
   return URL.createObjectURL(blob);
 }
 
-export interface CsvImportResult {
+export interface XlsxImportResult {
   productsCreated: number;
   productsUpdated: number;
   variantsCreated: number;
@@ -730,7 +730,7 @@ export interface CsvImportResult {
   errors: string[];
 }
 
-export async function importProductsCsv(file: File): Promise<CsvImportResult> {
+export async function importProductsXlsx(file: File): Promise<XlsxImportResult> {
   const formData = new FormData();
   formData.append("file", file);
   return apiFetch("/api/v1/products/admin/import", { method: "POST", body: formData });
@@ -922,6 +922,8 @@ export async function fetchPayments(
     search?: string;
     paymentMethod?: PaymentMethod[];
     status?: OrderStatus[];
+    dateFrom?: string;
+    dateTo?: string;
     sortBy?: PaymentSortField;
     sortDir?: SortDir;
     page?: number;
@@ -931,11 +933,41 @@ export async function fetchPayments(
   if (params.search) query.set("search", params.search);
   for (const method of params.paymentMethod ?? []) query.append("paymentMethod", method);
   for (const status of params.status ?? []) query.append("status", status);
+  if (params.dateFrom) query.set("dateFrom", params.dateFrom);
+  if (params.dateTo) query.set("dateTo", params.dateTo);
   if (params.sortBy) query.set("sortBy", params.sortBy);
   if (params.sortDir) query.set("sortDir", params.sortDir);
   if (params.page) query.set("page", String(params.page));
   const qs = query.toString();
   return apiFetch(`/api/v1/payments${qs ? `?${qs}` : ""}`);
+}
+
+// Exports whatever the Payments list is currently filtered to (search/
+// method/status/date range) — omit all params for the full unfiltered
+// export.
+export async function exportPaymentsCsvUrl(
+  params: {
+    search?: string;
+    paymentMethod?: PaymentMethod[];
+    status?: OrderStatus[];
+    dateFrom?: string;
+    dateTo?: string;
+  } = {}
+): Promise<string> {
+  const query = new URLSearchParams();
+  if (params.search) query.set("search", params.search);
+  for (const method of params.paymentMethod ?? []) query.append("paymentMethod", method);
+  for (const status of params.status ?? []) query.append("status", status);
+  if (params.dateFrom) query.set("dateFrom", params.dateFrom);
+  if (params.dateTo) query.set("dateTo", params.dateTo);
+  const qs = query.toString();
+  const res = await fetch(`${API_URL}/api/v1/payments/export${qs ? `?${qs}` : ""}`, {
+    credentials: "include",
+    headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : {},
+  });
+  if (!res.ok) throw new ApiError(res.status, "Failed to export payments");
+  const blob = await res.blob();
+  return URL.createObjectURL(blob);
 }
 
 // The endpoint always returns the full OrderDetail shape (via getOrderById

@@ -3,10 +3,10 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import {
-  exportProductsCsvUrl,
+  exportProductsXlsxUrl,
   fetchCategories,
   fetchProducts,
-  importProductsCsv,
+  importProductsXlsx,
   type Category,
   type Product,
   type ProductSortField,
@@ -97,10 +97,10 @@ export default function CatalogPage() {
   }
 
   async function handleExport() {
-    const url = await exportProductsCsvUrl();
+    const url = await exportProductsXlsxUrl();
     const a = document.createElement("a");
     a.href = url;
-    a.download = "catalog-export.csv";
+    a.download = "catalog-export.xlsx";
     a.click();
     URL.revokeObjectURL(url);
   }
@@ -109,7 +109,7 @@ export default function CatalogPage() {
     setImporting(true);
     setImportResult(null);
     try {
-      const result = await importProductsCsv(file);
+      const result = await importProductsXlsx(file);
       setImportResult(
         `Imported: ${result.productsCreated} created, ${result.productsUpdated} updated products; ` +
           `${result.variantsCreated} created, ${result.variantsUpdated} updated variants.` +
@@ -144,19 +144,19 @@ export default function CatalogPage() {
             onClick={handleExport}
             className="rounded-md border border-ink-100 px-4 py-2 text-sm font-medium text-ink-700 hover:bg-gray-50"
           >
-            Export CSV
+            Export XLSX
           </button>
           <button
             disabled={importing}
             onClick={() => fileInputRef.current?.click()}
             className="rounded-md border border-ink-100 px-4 py-2 text-sm font-medium text-ink-700 hover:bg-gray-50 disabled:opacity-50"
           >
-            {importing ? "Importing..." : "Import CSV"}
+            {importing ? "Importing..." : "Import XLSX"}
           </button>
           <input
             ref={fileInputRef}
             type="file"
-            accept=".csv,text/csv"
+            accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             hidden
             onChange={(e) => {
               const file = e.target.files?.[0];

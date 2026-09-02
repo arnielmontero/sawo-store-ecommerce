@@ -96,7 +96,7 @@ export function HistoryTab() {
     });
     const a = document.createElement("a");
     a.href = url;
-    a.download = "deliveries-history-export.csv";
+    a.download = "deliveries-history-export.xlsx";
     a.click();
     URL.revokeObjectURL(url);
   }

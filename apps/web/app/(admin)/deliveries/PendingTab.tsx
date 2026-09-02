@@ -128,7 +128,7 @@ export function PendingTab() {
     });
     const a = document.createElement("a");
     a.href = url;
-    a.download = "deliveries-pending-export.csv";
+    a.download = "deliveries-pending-export.xlsx";
     a.click();
     URL.revokeObjectURL(url);
   }

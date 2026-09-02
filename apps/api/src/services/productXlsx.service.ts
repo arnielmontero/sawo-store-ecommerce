@@ -1,11 +1,12 @@
 import { Prisma } from "@prisma/client";
 import { prisma } from "../lib/prisma";
-import { toCsv, parseCsv } from "../lib/csv";
+import { toXlsx, fromXlsx } from "../lib/xlsx";
 
 // One row per variant (not per product) — this is the convention every
-// mainstream platform (Shopify included) uses for product CSVs, since a
-// spreadsheet naturally wants one row per sellable SKU. Rows sharing the
-// same "Handle" (slug) are grouped back into one product on import.
+// mainstream platform (Shopify included) uses for product spreadsheets,
+// since a spreadsheet naturally wants one row per sellable SKU. Rows
+// sharing the same "Handle" (slug) are grouped back into one product on
+// import.
 const HEADERS = [
   "Handle",
   "Title",
@@ -21,7 +22,7 @@ const HEADERS = [
   "Image URL",
 ];
 
-export async function exportProductsCsv(): Promise<string> {
+export async function exportProductsXlsx(): Promise<Buffer> {
   const products = await prisma.product.findMany({
     include: {
       category: true,
@@ -31,7 +32,7 @@ export async function exportProductsCsv(): Promise<string> {
     orderBy: { id: "asc" },
   });
 
-  const rows: string[][] = [];
+  const rows: (string | number)[][] = [];
   for (const product of products) {
     const tags = product.tags.map((pt) => pt.tag.name).join(";");
     if (product.variants.length === 0) {
@@ -41,8 +42,8 @@ export async function exportProductsCsv(): Promise<string> {
         product.description ?? "",
         product.category?.name ?? "",
         tags,
-        (product.basePriceCents / 100).toFixed(2),
-        product.compareAtPriceCents ? (product.compareAtPriceCents / 100).toFixed(2) : "",
+        product.basePriceCents / 100,
+        product.compareAtPriceCents ? product.compareAtPriceCents / 100 : "",
         "",
         "",
         "",
@@ -58,21 +59,21 @@ export async function exportProductsCsv(): Promise<string> {
         product.description ?? "",
         product.category?.name ?? "",
         tags,
-        (product.basePriceCents / 100).toFixed(2),
-        product.compareAtPriceCents ? (product.compareAtPriceCents / 100).toFixed(2) : "",
+        product.basePriceCents / 100,
+        product.compareAtPriceCents ? product.compareAtPriceCents / 100 : "",
         variant.sku,
-        (variant.priceCents / 100).toFixed(2),
+        variant.priceCents / 100,
         variant.attributes ? JSON.stringify(variant.attributes) : "",
-        String(variant.inventory?.stockQuantity ?? 0),
+        variant.inventory?.stockQuantity ?? 0,
         variant.imageUrl ?? "",
       ]);
     }
   }
 
-  return toCsv(HEADERS, rows);
+  return toXlsx(HEADERS, rows, "Products");
 }
 
-export interface CsvImportResult {
+export interface XlsxImportResult {
   productsCreated: number;
   productsUpdated: number;
   variantsCreated: number;
@@ -88,14 +89,14 @@ function slugify(value: string) {
     .replace(/(^-|-$)/g, "");
 }
 
-// Imports/upserts products and variants from a CSV in the same shape
-// exportProductsCsv produces. Matches products by Handle (slug) and
+// Imports/upserts products and variants from an .xlsx file in the same
+// shape exportProductsXlsx produces. Matches products by Handle (slug) and
 // variants by SKU, so re-importing an exported file is a safe no-op, and
 // editing quantities in a spreadsheet then re-importing updates stock in
 // bulk. Malformed rows are collected into `errors` and skipped rather than
 // aborting the whole import.
-export async function importProductsCsv(csvText: string): Promise<CsvImportResult> {
-  const rows = parseCsv(csvText);
+export async function importProductsXlsx(buffer: Buffer): Promise<XlsxImportResult> {
+  const rows = await fromXlsx(buffer);
   if (rows.length === 0) {
     return { productsCreated: 0, productsUpdated: 0, variantsCreated: 0, variantsUpdated: 0, errors: ["Empty file"] };
   }
@@ -126,7 +127,7 @@ export async function importProductsCsv(csvText: string): Promise<CsvImportResul
     };
   }
 
-  const result: CsvImportResult = {
+  const result: XlsxImportResult = {
     productsCreated: 0,
     productsUpdated: 0,
     variantsCreated: 0,
@@ -134,7 +135,7 @@ export async function importProductsCsv(csvText: string): Promise<CsvImportResul
     errors: [],
   };
 
-  // Group rows by Handle so multi-variant products (several CSV rows) become
+  // Group rows by Handle so multi-variant products (several rows) become
   // one product create/update instead of one per row.
   const byHandle = new Map<string, string[][]>();
   for (const row of dataRows) {

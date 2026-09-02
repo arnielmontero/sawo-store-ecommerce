@@ -4,7 +4,7 @@ import { AdminRole } from "@prisma/client";
 import { requireAuth, requireRole } from "../middleware/requireAuth";
 import {
   listShipments,
-  exportShipmentsCsv,
+  exportShipmentsXlsx,
   getShipmentStatistics,
   refreshAllDeliveryStatuses,
   shipOrder,
@@ -74,16 +74,16 @@ shippingRouter.get("/", async (req, res, next) => {
 shippingRouter.get("/export", async (req, res, next) => {
   try {
     const q = listQueryBaseSchema.omit({ page: true }).refine(dateRangeRefinement, dateRangeIssue).parse(req.query);
-    const csv = await exportShipmentsCsv(q.tab, {
+    const buffer = await exportShipmentsXlsx(q.tab, {
       search: q.search,
       carrier: q.carrier,
       country: q.country,
       dateFrom: q.dateFrom,
       dateTo: q.dateTo,
     });
-    res.setHeader("Content-Type", "text/csv");
-    res.setHeader("Content-Disposition", `attachment; filename="deliveries-${q.tab}-export.csv"`);
-    res.send(csv);
+    res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+    res.setHeader("Content-Disposition", `attachment; filename="deliveries-${q.tab}-export.xlsx"`);
+    res.send(buffer);
   } catch (err) {
     next(err);
   }

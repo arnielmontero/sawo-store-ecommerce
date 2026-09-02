@@ -4,7 +4,7 @@ import fs from "fs";
 import { requireAuth, requireRole } from "../middleware/requireAuth";
 import { HttpError } from "../middleware/errorHandler";
 import { AdminRole } from "@prisma/client";
-import { upload, uploadCsv } from "../lib/upload";
+import { upload, uploadSpreadsheet } from "../lib/upload";
 import { env } from "../lib/env";
 import {
   addProductImage,
@@ -29,7 +29,7 @@ import {
   updateCategory,
   updateProduct,
 } from "../services/product.service";
-import { exportProductsCsv, importProductsCsv } from "../services/productCsv.service";
+import { exportProductsXlsx, importProductsXlsx } from "../services/productXlsx.service";
 import { adjustStockManually } from "../services/inventory.service";
 import { prisma } from "../lib/prisma";
 
@@ -158,15 +158,15 @@ adminRouter.get("/tags", async (_req, res, next) => {
   }
 });
 
-// ── CSV import/export — registered before "/:id" so "export"/"import"
-// never get parsed as a product id. ──────────────────────────────────
+// ── Spreadsheet import/export — registered before "/:id" so
+// "export"/"import" never get parsed as a product id. ──────────────────
 
 adminRouter.get("/export", async (_req, res, next) => {
   try {
-    const csv = await exportProductsCsv();
-    res.setHeader("Content-Type", "text/csv");
-    res.setHeader("Content-Disposition", `attachment; filename="catalog-export.csv"`);
-    res.send(csv);
+    const buffer = await exportProductsXlsx();
+    res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+    res.setHeader("Content-Disposition", `attachment; filename="catalog-export.xlsx"`);
+    res.send(buffer);
   } catch (err) {
     next(err);
   }
@@ -175,12 +175,12 @@ adminRouter.get("/export", async (_req, res, next) => {
 adminRouter.post(
   "/import",
   requireRole(AdminRole.ADMIN),
-  uploadCsv.single("file"),
+  uploadSpreadsheet.single("file"),
   async (req, res, next) => {
     try {
-      if (!req.file) throw new HttpError(400, "No CSV file uploaded");
-      const csvText = fs.readFileSync(req.file.path, "utf-8");
-      const result = await importProductsCsv(csvText);
+      if (!req.file) throw new HttpError(400, "No spreadsheet uploaded");
+      const buffer = fs.readFileSync(req.file.path);
+      const result = await importProductsXlsx(buffer);
       fs.unlinkSync(req.file.path);
       res.json(result);
     } catch (err) {

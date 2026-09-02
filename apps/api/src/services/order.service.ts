@@ -2,7 +2,7 @@ import { OrderStatus, PaymentMethod, Prisma, StockAdjustmentReason } from "@pris
 import { prisma } from "../lib/prisma";
 import { HttpError } from "../middleware/errorHandler";
 import { canTransition } from "../lib/orderStateMachine";
-import { toCsv } from "../lib/csv";
+import { toXlsx } from "../lib/xlsx";
 import { priceCart, type CartLine } from "./pricing.service";
 import { reserveStock, releaseStock, commitReservedStock, restockCommittedStock } from "./inventory.service";
 import { resolveStaleOrderNotifications } from "./notification.service";
@@ -100,7 +100,7 @@ export async function getOrderStatistics() {
   return { totalOrders, totalRevenueCents, avgOrderValueCents, newClientCount, countsByStatus };
 }
 
-const CSV_HEADERS = [
+const EXPORT_HEADERS = [
   "Reference",
   "Status",
   "Customer Email",
@@ -118,12 +118,14 @@ const CSV_HEADERS = [
   "Ordered At",
 ];
 
-// One row per order (not per item, unlike the Catalog CSV) — an order's
+// One row per order (not per item, unlike the Catalog export) — an order's
 // line items are summarized into one "SKU x qty; SKU x qty" cell, since
 // spreadsheet-per-order matches how admins actually use an orders export
 // (reconciliation/accounting), not per-item detail. Respects the exact same
-// filters as the on-screen list, via the shared buildOrdersWhere.
-export async function exportOrdersCsv(filters: ListOrdersFilters = {}): Promise<string> {
+// filters as the on-screen list, via the shared buildOrdersWhere. Money
+// columns are real numbers (not formatted strings) so the sheet stays
+// sortable/summable in Excel.
+export async function exportOrdersXlsx(filters: ListOrdersFilters = {}): Promise<Buffer> {
   const where = buildOrdersWhere(filters);
   const orders = await prisma.order.findMany({
     where,
@@ -140,19 +142,19 @@ export async function exportOrdersCsv(filters: ListOrdersFilters = {}): Promise<
     order.user?.email ?? "",
     order.paymentMethod ?? "",
     order.items.map((item) => `${item.variant.sku} x${item.quantity}`).join("; "),
-    (order.subtotalCents / 100).toFixed(2),
-    (order.discountCents / 100).toFixed(2),
-    (order.shippingCents / 100).toFixed(2),
-    (order.taxCents / 100).toFixed(2),
-    (order.totalCents / 100).toFixed(2),
-    (order.refundedCents / 100).toFixed(2),
+    order.subtotalCents / 100,
+    order.discountCents / 100,
+    order.shippingCents / 100,
+    order.taxCents / 100,
+    order.totalCents / 100,
+    order.refundedCents / 100,
     order.currency,
     order.isNewClient ? "Yes" : "No",
     order.trackingNumber ?? "",
     order.createdAt.toISOString(),
   ]);
 
-  return toCsv(CSV_HEADERS, rows);
+  return toXlsx(EXPORT_HEADERS, rows, "Orders");
 }
 
 // Orders currently sitting in PARTIALLY_REFUNDED — an in-between state
