@@ -119,7 +119,15 @@ export async function updateAdminUser(id: number, input: UpdateAdminUserInput) {
   }
 
   const passwordHash = input.password ? await hashPassword(input.password) : undefined;
-  const permissionIds = input.permissions ? await resolvePermissionIds(input.permissions) : null;
+
+  // A role change with no explicit permissions falls back to that role's
+  // preset rather than leaving the account's existing grant rows as-is —
+  // otherwise a demoted ADMIN keeps its old (possibly full-catalog) grants
+  // with no visible indication, or a promoted account is stuck under-
+  // permissioned until someone remembers to also update its checkboxes.
+  const permissionTokens =
+    input.permissions ?? (input.role && input.role !== user.role ? PRESET_GRANTS[input.role] : undefined);
+  const permissionIds = permissionTokens ? await resolvePermissionIds(permissionTokens) : null;
 
   await prisma.$transaction(async (tx) => {
     await tx.adminUser.update({

@@ -733,7 +733,12 @@ export default function ProductDetailPage() {
         )}
       </div>
 
-      <ReviewsAndQnaPanel productId={product.id} canModerate={hasPermission(user, "reviews", "delete")} />
+      <ReviewsAndQnaPanel
+        productId={product.id}
+        canLog={hasPermission(user, "reviews", "respond")}
+        canAnswer={hasPermission(user, "reviews", "answer")}
+        canDelete={hasPermission(user, "reviews", "delete")}
+      />
     </div>
   );
 }

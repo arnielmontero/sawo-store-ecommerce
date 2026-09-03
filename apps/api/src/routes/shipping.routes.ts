@@ -11,7 +11,7 @@ import {
 
 export const shippingRouter = Router();
 
-shippingRouter.use(requireAuth, requirePermission("deliveries", "manage"));
+shippingRouter.use(requireAuth);
 
 // carrier/country arrive as either a single string or an array depending on
 // how many values are selected — standard Express query-parsing behavior
@@ -44,7 +44,7 @@ const listQuerySchema = listQueryBaseSchema.refine(dateRangeRefinement, dateRang
 
 // Registered before "/:orderId"-shaped routes so "export"/"statistics"
 // never get parsed as an order id — same precaution as orders.routes.ts.
-shippingRouter.get("/", async (req, res, next) => {
+shippingRouter.get("/", requirePermission("deliveries", "view"), async (req, res, next) => {
   try {
     const q = listQuerySchema.parse(req.query);
     // Live refresh from EasyPost only applies to the in-transit tab — the
@@ -70,7 +70,7 @@ shippingRouter.get("/", async (req, res, next) => {
 // Exports the same filtered set the on-screen tab would show (minus
 // pagination) — reuses listQuerySchema so search/carrier/country/date
 // filters behave identically between the list and its export.
-shippingRouter.get("/export", async (req, res, next) => {
+shippingRouter.get("/export", requirePermission("deliveries", "view"), async (req, res, next) => {
   try {
     const q = listQueryBaseSchema.omit({ page: true }).refine(dateRangeRefinement, dateRangeIssue).parse(req.query);
     const buffer = await exportShipmentsXlsx(q.tab, {
@@ -88,7 +88,7 @@ shippingRouter.get("/export", async (req, res, next) => {
   }
 });
 
-shippingRouter.get("/statistics", async (_req, res, next) => {
+shippingRouter.get("/statistics", requirePermission("deliveries", "view"), async (_req, res, next) => {
   try {
     const stats = await getShipmentStatistics();
     res.json(stats);
@@ -99,7 +99,7 @@ shippingRouter.get("/statistics", async (_req, res, next) => {
 
 const shipSchema = z.object({ trackingNumber: z.string().min(1), carrier: z.string().min(1).optional() });
 
-shippingRouter.patch("/:orderId/ship", async (req, res, next) => {
+shippingRouter.patch("/:orderId/ship", requirePermission("deliveries", "manage"), async (req, res, next) => {
   try {
     const orderId = Number(req.params.orderId);
     const { trackingNumber, carrier } = shipSchema.parse(req.body);

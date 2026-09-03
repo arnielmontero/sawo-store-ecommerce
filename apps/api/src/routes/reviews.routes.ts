@@ -125,7 +125,7 @@ questionsRouter.get("/", async (req, res, next) => {
 
 const answerQuestionSchema = z.object({ answer: z.string().min(1).max(4000) });
 
-questionsRouter.post("/:id/answer", requirePermission("reviews", "respond"), async (req, res, next) => {
+questionsRouter.post("/:id/answer", requirePermission("reviews", "answer"), async (req, res, next) => {
   try {
     const id = Number(req.params.id);
     const { answer } = answerQuestionSchema.parse(req.body);

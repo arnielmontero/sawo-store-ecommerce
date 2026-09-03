@@ -59,7 +59,13 @@ function useProductSearch() {
 
 export default function ReviewsPage() {
   const { user } = useAuth();
-  const canModerate = hasPermission(user, "reviews", "delete");
+  // Three distinct capabilities, not one — logging a review/question,
+  // answering a question, and deleting a review were three different
+  // access tiers under the old role checks, so they stay three separate
+  // permission checks here rather than one blanket "moderate" flag.
+  const canLog = hasPermission(user, "reviews", "respond");
+  const canAnswer = hasPermission(user, "reviews", "answer");
+  const canDelete = hasPermission(user, "reviews", "delete");
 
   const [tab, setTab] = useState<Tab>("reviews");
 
@@ -214,7 +220,7 @@ export default function ReviewsPage() {
         <div className="mt-6 rounded-xl border border-ink-100 bg-white">
           <div className="flex items-center justify-between border-b border-ink-100 px-5 py-4">
             <p className="text-sm font-medium text-ink-900">All reviews</p>
-            {canModerate && (
+            {canLog && (
               <button
                 onClick={() => setShowLogReview((v) => !v)}
                 className="text-xs font-medium text-brand-600 hover:underline"
@@ -329,7 +335,7 @@ export default function ReviewsPage() {
                         {review.authorName} · {new Date(review.createdAt).toLocaleDateString()}
                       </p>
                     </div>
-                    {canModerate && (
+                    {canDelete && (
                       <button
                         onClick={() => handleDeleteReview(review)}
                         className="shrink-0 text-xs font-medium text-red-600 hover:underline"
@@ -354,12 +360,14 @@ export default function ReviewsPage() {
                 <input type="checkbox" checked={unansweredOnly} onChange={(e) => setUnansweredOnly(e.target.checked)} />
                 Unanswered only
               </label>
-              <button
-                onClick={() => setShowLogQuestion((v) => !v)}
-                className="text-xs font-medium text-brand-600 hover:underline"
-              >
-                {showLogQuestion ? "Cancel" : "+ Log question"}
-              </button>
+              {canLog && (
+                <button
+                  onClick={() => setShowLogQuestion((v) => !v)}
+                  className="text-xs font-medium text-brand-600 hover:underline"
+                >
+                  {showLogQuestion ? "Cancel" : "+ Log question"}
+                </button>
+              )}
             </div>
           </div>
 
@@ -444,7 +452,7 @@ export default function ReviewsPage() {
                         Answered by {q.answeredByName} · {new Date(q.answeredAt).toLocaleDateString()}
                       </p>
                     </div>
-                  ) : canModerate ? (
+                  ) : canAnswer ? (
                     <div className="mt-2 flex gap-2">
                       <input
                         type="text"

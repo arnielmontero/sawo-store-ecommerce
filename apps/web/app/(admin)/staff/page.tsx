@@ -193,7 +193,11 @@ export default function StaffPage() {
         password,
         name: name.trim(),
         role,
-        permissions: [...newPerms],
+        // Admin accounts always get full access via the super-admin flag,
+        // regardless of grant rows — omit permissions entirely so the
+        // backend falls back to the full-catalog preset rather than
+        // whatever was left checked from a previous, different role.
+        permissions: role === "ADMIN" ? undefined : [...newPerms],
       });
       setStaff((prev) => [...prev, created]);
       setUsername("");

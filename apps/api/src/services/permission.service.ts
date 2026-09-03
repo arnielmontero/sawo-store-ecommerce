@@ -13,13 +13,30 @@ import { prisma } from "../lib/prisma";
 export const PERMISSION_CATALOG: { module: string; label: string; actions: string[] }[] = [
   // Orders are never created or deleted from the admin (checkout creates
   // them; nothing deletes them), so this module has no create/delete.
-  { module: "orders", label: "Orders", actions: ["view", "edit", "changeStatus", "refund"] },
-  { module: "catalog", label: "Catalog (Products & Categories)", actions: ["view", "create", "edit", "delete"] },
+  // reviewReturns is split from changeStatus: rejecting a return request
+  // was historically Admin + Manager only, narrower than changeStatus
+  // (which Fulfillment Staff also holds for ordinary status transitions
+  // and logging a return request) — approving one already lives under
+  // "refund" since it moves money via the same refundOrder() service the
+  // Payments refund route calls.
+  { module: "orders", label: "Orders", actions: ["view", "edit", "changeStatus", "refund", "reviewReturns"] },
+  // adjustStock is split from edit: it's the quick inline stock field on
+  // the Catalog page, which historically had a WIDER access tier
+  // (Admin + Fulfillment Staff) than editing a product's other fields
+  // (Admin + Manager) — folding it into "edit" would have quietly taken
+  // this away from Fulfillment Staff. Distinct from inventory:adjustStock,
+  // which gates the separate dedicated Inventory module's adjust flow.
+  { module: "catalog", label: "Catalog (Products & Categories)", actions: ["view", "create", "edit", "delete", "adjustStock"] },
   // Inventory rows are created implicitly alongside variants, never directly.
   { module: "inventory", label: "Inventory", actions: ["view", "adjustStock"] },
   { module: "coupons", label: "Coupons", actions: ["view", "create", "edit", "delete"] },
   { module: "customers", label: "Customers", actions: ["view", "edit", "logActivity", "delete"] },
-  { module: "reviews", label: "Reviews & Q&A", actions: ["view", "respond", "delete"] },
+  // respond = logging a review or a customer question on their behalf
+  // (historically Admin + Manager + Fulfillment Staff); answer = writing
+  // the store's public answer to a logged question (historically
+  // Admin + Manager only) — kept as two separate actions since they were
+  // two different access tiers under the old role checks, not one.
+  { module: "reviews", label: "Reviews & Q&A", actions: ["view", "respond", "answer", "delete"] },
   // Viewing payments is its own capability; the refund action itself lives
   // under orders.refund because both refund entry points (the payments route
   // and the return-request approval) call the same refundOrder() service —
@@ -63,10 +80,12 @@ export const PRESET_GRANTS: Record<AdminRole, string[]> = {
     "orders:edit",
     "orders:changeStatus",
     "orders:refund",
+    "orders:reviewReturns",
     "catalog:view",
     "catalog:create",
     "catalog:edit",
     "catalog:delete",
+    "catalog:adjustStock",
     "inventory:view",
     "inventory:adjustStock",
     "coupons:view",
@@ -79,6 +98,7 @@ export const PRESET_GRANTS: Record<AdminRole, string[]> = {
     "customers:delete",
     "reviews:view",
     "reviews:respond",
+    "reviews:answer",
     "reviews:delete",
     "payments:view",
     "deliveries:view",
@@ -99,6 +119,7 @@ export const PRESET_GRANTS: Record<AdminRole, string[]> = {
     "orders:edit",
     "orders:changeStatus",
     "catalog:view",
+    "catalog:adjustStock",
     "inventory:view",
     "coupons:view",
     "customers:view",

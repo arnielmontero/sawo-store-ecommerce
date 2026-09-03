@@ -305,7 +305,7 @@ const rejectReturnRequestSchema = z.object({ reviewNote: z.string().max(2000).op
 
 ordersRouter.post(
   "/return-requests/:requestId/reject",
-  requirePermission("orders", "changeStatus"),
+  requirePermission("orders", "reviewReturns"),
   async (req, res, next) => {
     try {
       const requestId = Number(req.params.requestId);

@@ -335,7 +335,7 @@ const stockSchema = z.object({ stockQuantity: z.number().int().nonnegative() });
 
 adminRouter.patch(
   "/variants/:variantId/stock",
-  requirePermission("catalog", "edit"),
+  requirePermission("catalog", "adjustStock"),
   async (req, res, next) => {
     try {
       const variantId = Number(req.params.variantId);

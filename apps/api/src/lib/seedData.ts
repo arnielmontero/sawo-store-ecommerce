@@ -38,6 +38,14 @@ async function seedPermissions() {
 // Grants an account exactly the permission set its role preset describes.
 // Used to give the seeded demo accounts the same access their old
 // role-based checks gave them, so nothing silently changes hands.
+//
+// Deliberately guard-and-skip once any grant rows exist, unlike
+// seedPermissions()'s upsert-to-stay-in-sync above — these three accounts
+// are real, logged-into admin accounts a developer may have hand-edited via
+// the Staff page (e.g. testing a custom permission set on "manager"), so
+// re-syncing on every reseed would silently clobber that. The tradeoff:
+// if PRESET_GRANTS changes later, these seeded accounts won't pick up the
+// new set without a full DB reset — accepted as the lesser risk.
 async function grantPreset(adminUserId: number, role: AdminRole) {
   const tokens = PRESET_GRANTS[role] ?? [];
   const existing = await prisma.adminUserPermission.count({ where: { adminUserId } });

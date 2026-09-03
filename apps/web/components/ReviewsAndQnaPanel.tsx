@@ -26,7 +26,17 @@ function Stars({ rating }: { rating: number }) {
   );
 }
 
-export function ReviewsAndQnaPanel({ productId, canModerate }: { productId: number; canModerate: boolean }) {
+export function ReviewsAndQnaPanel({
+  productId,
+  canLog,
+  canAnswer,
+  canDelete,
+}: {
+  productId: number;
+  canLog: boolean;
+  canAnswer: boolean;
+  canDelete: boolean;
+}) {
   const [tab, setTab] = useState<"reviews" | "qna">("reviews");
 
   const [reviews, setReviews] = useState<Review[] | null>(null);
@@ -160,7 +170,7 @@ export function ReviewsAndQnaPanel({ productId, canModerate }: { productId: numb
             Q&amp;A{unansweredCount > 0 && ` (${unansweredCount} unanswered)`}
           </button>
         </div>
-        {tab === "reviews" && !reviewFormOpen && (
+        {tab === "reviews" && canLog && !reviewFormOpen && (
           <button
             onClick={openReviewForm}
             className="rounded-md border border-ink-100 px-3 py-1.5 text-sm font-medium text-ink-700 hover:bg-gray-50"
@@ -168,7 +178,7 @@ export function ReviewsAndQnaPanel({ productId, canModerate }: { productId: numb
             Log review
           </button>
         )}
-        {tab === "qna" && !questionFormOpen && (
+        {tab === "qna" && canLog && !questionFormOpen && (
           <button
             onClick={() => setQuestionFormOpen(true)}
             className="rounded-md border border-ink-100 px-3 py-1.5 text-sm font-medium text-ink-700 hover:bg-gray-50"
@@ -273,7 +283,7 @@ export function ReviewsAndQnaPanel({ productId, canModerate }: { productId: numb
                       </span>
                     </div>
                     <p className="mt-2 text-sm text-ink-900">{review.body}</p>
-                    {canModerate && (
+                    {canDelete && (
                       <div className="mt-3 flex justify-end border-t border-ink-100 pt-3">
                         {confirmDeleteId === review.id ? (
                           <div className="flex items-center gap-2">
@@ -392,7 +402,7 @@ export function ReviewsAndQnaPanel({ productId, canModerate }: { productId: numb
                         {q.answeredAt && <span className="ml-1 text-xs text-ink-400">· {formatDateTime(q.answeredAt)}</span>}
                       </p>
                     ) : (
-                      canModerate && (
+                      canAnswer && (
                         <div className="mt-3 border-t border-ink-100 pt-3">
                           <textarea
                             value={answerDrafts[q.id] ?? ""}
