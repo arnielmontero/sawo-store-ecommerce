@@ -18,12 +18,24 @@ const validateSchema = z.object({
       })
     )
     .min(1),
-  // Optional — lets the storefront's preview reflect the real tax the
-  // customer will pay (see taxRule.service.ts) instead of always showing
-  // $0 tax until the order is actually placed. Omitted entirely still
-  // works fine (taxCents just comes back 0), so this stays backward
-  // compatible with any caller that only cares about the discount.
+  // Optional — lets the storefront's preview reflect the real tax AND
+  // shipping cost the customer will pay (see taxRule.service.ts,
+  // lib/shippingQuote.ts) instead of always showing $0 until the order is
+  // actually placed. Omitted entirely still works fine (taxCents/
+  // shippingCents just come back 0), so this stays backward compatible
+  // with any caller that only cares about the discount.
   shippingCountry: z.string().length(2).toUpperCase().optional(),
+  // Full address — when present (customer has finished typing it), the
+  // preview's shippingCents reflects a fully accurate quote for that exact
+  // address rather than the country-level representative-city estimate.
+  address: z
+    .object({
+      street1: z.string().min(1),
+      city: z.string().min(1),
+      state: z.string().min(1),
+      postalCode: z.string().min(1),
+    })
+    .optional(),
 });
 
 // "Customer" access per the design — same unauthenticated + rate-limited
@@ -33,11 +45,13 @@ const validateSchema = z.object({
 // itself never increments usageCount.
 couponsRouter.post("/validate", checkoutRateLimiter, async (req, res, next) => {
   try {
-    const { code, items, shippingCountry } = validateSchema.parse(req.body);
-    const pricing = await priceCart(items, code, shippingCountry);
+    const { code, items, shippingCountry, address } = validateSchema.parse(req.body);
+    const pricing = await priceCart(items, code, shippingCountry, address);
     res.json({
       discountCents: pricing.discountCents,
       shippingCents: pricing.shippingCents,
+      shippingServiceName: pricing.shippingServiceName,
+      isShippingEstimate: pricing.isShippingEstimate,
       taxCents: pricing.taxCents,
       totalCents: pricing.totalCents,
       appliedCoupon: pricing.appliedCoupon,

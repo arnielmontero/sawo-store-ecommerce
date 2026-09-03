@@ -41,6 +41,22 @@ const updateSettingsSchema = z.object({
   logoUrl: z.string().url().nullable().optional(),
   allowPartialRefunds: z.boolean().optional(),
   defaultCarrier: z.string().min(1).max(40).optional(),
+  // Which tracking provider shipping.service.ts uses when an order is
+  // marked shipped. Both are wired up: EasyPost tracks a manually-entered
+  // number; ShipStation (ShipEngine) can additionally purchase a real
+  // label and generate the tracking number itself.
+  deliveryProvider: z.enum(["EASYPOST", "SHIPSTATION"]).optional(),
+  // The store's own shipping-origin address — required (all except street2)
+  // before a ShipEngine label purchase will proceed, see
+  // shipping.service.ts's buyShipEngineLabel.
+  shipFromName: z.string().max(100).optional(),
+  shipFromPhone: z.string().max(30).optional(),
+  shipFromStreet1: z.string().max(200).optional(),
+  shipFromStreet2: z.string().max(200).optional(),
+  shipFromCity: z.string().max(100).optional(),
+  shipFromState: z.string().max(50).optional(),
+  shipFromZip: z.string().max(20).optional(),
+  shipFromCountry: z.string().max(2).optional(),
   // Which credential pair is actually live — see lib/credentials.ts.
   // Switching TO production is intentionally not a plain field flip: see
   // the explicit confirm check below, since it changes whether Stripe
@@ -55,9 +71,11 @@ const updateSettingsSchema = z.object({
   stripeSecretKeyTest: z.string().max(500).optional(),
   stripeWebhookSecretTest: z.string().max(500).optional(),
   easypostApiKeyTest: z.string().max(500).optional(),
+  shipstationApiKeyTest: z.string().max(500).optional(),
   stripeSecretKeyLive: z.string().max(500).optional(),
   stripeWebhookSecretLive: z.string().max(500).optional(),
   easypostApiKeyLive: z.string().max(500).optional(),
+  shipstationApiKeyLive: z.string().max(500).optional(),
 });
 
 settingsRouter.patch("/", requirePermission("configuration", "edit"), async (req, res, next) => {

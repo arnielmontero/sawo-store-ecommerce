@@ -91,6 +91,9 @@ export interface VariantDetail {
   priceCents: number;
   attributes: Record<string, string> | null;
   imageUrl: string | null;
+  // Shipping weight in ounces — null falls back to a default at
+  // label-purchase time (see the API's shipengine.ts DEFAULT_WEIGHT_OZ).
+  weight: number | null;
   isActive: boolean;
   compareAtPriceCents: number | null;
   saleStartsAt: string | null;
@@ -147,6 +150,7 @@ export interface UpdateProductInput {
     priceCents: number;
     attributes?: Record<string, string>;
     imageUrl?: string | null;
+    weight?: number | null;
     compareAtPriceCents?: number | null;
     saleStartsAt?: string | null;
     saleEndsAt?: string | null;
@@ -322,6 +326,10 @@ export interface Shipment {
   trackingNumber: string | null;
   easypostTrackingUrl: string | null;
   deliveryStatus: string | null;
+  // Our own /uploads/<uuid>.pdf copy of a purchased ShipEngine label — set
+  // only when the tracking number was auto-generated via buyShipEngineLabel,
+  // never for a manually-entered EasyPost tracking number.
+  labelUrl: string | null;
   items: { id: number; variantId: number; quantity: number; unitPriceCents: number }[];
   isOverdue: boolean;
   overdueReason: OverdueReason;
@@ -406,6 +414,7 @@ export interface OrderDetail {
   trackingNumber: string | null;
   deliveryStatus: string | null;
   easypostTrackingUrl: string | null;
+  labelUrl: string | null;
   stripePaymentIntentId: string | null;
   paymentAttemptCount: number;
   createdAt: string;
@@ -478,10 +487,35 @@ class ApiError extends Error {
   }
 }
 
-async function apiFetch(path: string, options: RequestInit = {}) {
-  // FormData sets its own multipart boundary Content-Type — forcing
-  // application/json here would break file uploads, so only default to
-  // JSON when the body isn't already a FormData instance.
+// The access token is only 15 minutes old before it 401s — plenty of admin
+// actions (filling out a form, reviewing an order) take longer than that.
+// Without this, every request made after expiry would surface the backend's
+// raw "Unauthorized" as if it were a real error, on whatever the admin
+// happened to be doing at the time (see settings/staff/etc. call sites,
+// which just render err.message). A single shared in-flight refresh means
+// several requests 401ing around the same moment (e.g. a page's initial
+// parallel fetches) trigger one /auth/refresh call, not one each.
+let refreshInFlight: Promise<string | null> | null = null;
+
+async function refreshAccessTokenOnce(): Promise<string | null> {
+  if (!refreshInFlight) {
+    refreshInFlight = rawFetch("/api/auth/refresh", { method: "POST" })
+      .then((data) => {
+        accessToken = data.accessToken as string;
+        return accessToken;
+      })
+      .catch(() => {
+        accessToken = null;
+        return null;
+      })
+      .finally(() => {
+        refreshInFlight = null;
+      });
+  }
+  return refreshInFlight;
+}
+
+async function rawFetch(path: string, options: RequestInit = {}) {
   const isFormData = typeof FormData !== "undefined" && options.body instanceof FormData;
 
   const res = await fetch(`${API_URL}${path}`, {
@@ -501,6 +535,31 @@ async function apiFetch(path: string, options: RequestInit = {}) {
 
   if (res.status === 204) return null;
   return res.json();
+}
+
+// /auth/refresh and /auth/login are excluded from the retry-on-401 below —
+// refresh 401ing means the session is genuinely gone (no valid refresh
+// cookie), so retrying it would just loop; login 401ing means bad
+// credentials, not an expired token.
+const NO_RETRY_PATHS = ["/api/auth/refresh", "/api/auth/login"];
+
+async function apiFetch(path: string, options: RequestInit = {}) {
+  // FormData bodies aren't safely re-readable after a failed fetch in every
+  // browser — rather than risk a silently-empty retry body, skip the
+  // refresh-and-retry for uploads and just surface the 401 as-is (uploads
+  // are also typically a direct result of a fresh user action, less likely
+  // to hit a stale token than a form filled out over several minutes).
+  const isFormData = typeof FormData !== "undefined" && options.body instanceof FormData;
+
+  try {
+    return await rawFetch(path, options);
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 401 && !isFormData && !NO_RETRY_PATHS.includes(path)) {
+      const refreshed = await refreshAccessTokenOnce();
+      if (refreshed) return rawFetch(path, options);
+    }
+    throw err;
+  }
 }
 
 export async function login(username: string, password: string) {
@@ -939,6 +998,64 @@ export async function shipOrder(orderId: number, trackingNumber: string, carrier
   return data.order;
 }
 
+// No side effects, no cost — best-effort parse of the order's shipping
+// address for review before a real label is purchased. See
+// buyShipEngineLabel below.
+export interface LabelPreview {
+  street1: string;
+  street2?: string;
+  city: string;
+  state: string;
+  postalCode: string;
+  carrier: string | null;
+  availableCarriers: string[];
+}
+
+export async function fetchLabelPreview(orderId: number): Promise<LabelPreview> {
+  return apiFetch(`/api/v1/shipping/${orderId}/label-preview`);
+}
+
+// Real price quote — NO purchase, NO cost, safe to call repeatedly as the
+// admin edits the review panel (carrier/address changes). This is what
+// lets "Confirm purchase" show a real price instead of confirming blind.
+export interface LabelQuote {
+  serviceName: string;
+  amountCents: number;
+  currency: string;
+  estimatedDeliveryDate: string | null;
+  deliveryDays: number | null;
+}
+
+export async function fetchLabelQuote(
+  orderId: number,
+  input: {
+    carrier?: string;
+    address?: { street1: string; street2?: string; city: string; state: string; postalCode: string };
+  }
+): Promise<LabelQuote> {
+  return apiFetch(`/api/v1/shipping/${orderId}/label-quote`, {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+}
+
+// Buys a REAL ShipEngine label — costs real money on a live account.
+// address, when passed, is whatever the admin edited in the review panel;
+// omit it to trust the auto-parsed address as-is.
+export async function buyShipEngineLabel(
+  orderId: number,
+  input: {
+    carrier?: string;
+    address?: { street1: string; street2?: string; city: string; state: string; postalCode: string };
+  }
+): Promise<Order> {
+  const data = await apiFetch(`/api/v1/shipping/${orderId}/buy-label`, {
+    method: "POST",
+    body: JSON.stringify(input),
+  });
+  return data.order;
+}
+
 export async function fetchCarrierRules(): Promise<CarrierRule[]> {
   const data = await apiFetch("/api/v1/carrier-rules");
   return data.rules;
@@ -1134,12 +1251,29 @@ export async function refundPayment(
 }
 
 export type ApiEnvironment = "SANDBOX" | "PRODUCTION";
+export type DeliveryProvider = "EASYPOST" | "SHIPSTATION";
 
 export interface StoreSettings {
   storeName: string;
   logoUrl: string | null;
   allowPartialRefunds: boolean;
   defaultCarrier: string;
+  // Which tracking provider shipping happens through — see
+  // shipping.service.ts on the server. Both are wired up: EasyPost tracks a
+  // manually-entered number; ShipStation (ShipEngine) can additionally
+  // purchase a real label and generate the tracking number itself.
+  deliveryProvider: DeliveryProvider;
+  // The store's own shipping-origin address — required before a ShipEngine
+  // label purchase will proceed. Configured here, used server-side as the
+  // ship_from side of the label request.
+  shipFromName: string | null;
+  shipFromPhone: string | null;
+  shipFromStreet1: string | null;
+  shipFromStreet2: string | null;
+  shipFromCity: string | null;
+  shipFromState: string | null;
+  shipFromZip: string | null;
+  shipFromCountry: string | null;
   // Which credential pair below is actually used to build the
   // Stripe/EasyPost clients — see lib/credentials.ts on the server.
   apiEnvironment: ApiEnvironment;
@@ -1149,9 +1283,19 @@ export interface StoreSettings {
   stripeSecretKeyTestSet: boolean;
   stripeWebhookSecretTestSet: boolean;
   easypostApiKeyTestSet: boolean;
+  shipstationApiKeyTestSet: boolean;
   stripeSecretKeyLiveSet: boolean;
   stripeWebhookSecretLiveSet: boolean;
   easypostApiKeyLiveSet: boolean;
+  shipstationApiKeyLiveSet: boolean;
+  // Carrier display names (matching CARRIER_OPTIONS in lib/constants.ts)
+  // that are actually connected on this store's ShipEngine account right
+  // now — fetched live from ShipEngine's GET /v1/carriers, not a static
+  // guess (see the API's lib/shipengine.ts). Only populated when
+  // deliveryProvider is "SHIPSTATION". Used to warn on the Deliveries "Mark
+  // shipped" carrier dropdown rather than let tracking silently fail for a
+  // carrier that isn't connected.
+  shipEngineSupportedCarriers: string[];
 }
 
 export async function fetchStoreSettings(): Promise<StoreSettings> {
@@ -1183,6 +1327,31 @@ export async function setDefaultCarrier(defaultCarrier: string): Promise<StoreSe
   return data.settings;
 }
 
+export async function setDeliveryProvider(deliveryProvider: DeliveryProvider): Promise<StoreSettings> {
+  const data = await apiFetch("/api/v1/settings", {
+    method: "PATCH",
+    body: JSON.stringify({ deliveryProvider }),
+  });
+  return data.settings;
+}
+
+export async function setShipFromAddress(input: {
+  shipFromName: string;
+  shipFromPhone?: string;
+  shipFromStreet1: string;
+  shipFromStreet2?: string;
+  shipFromCity: string;
+  shipFromState: string;
+  shipFromZip: string;
+  shipFromCountry: string;
+}): Promise<StoreSettings> {
+  const data = await apiFetch("/api/v1/settings", {
+    method: "PATCH",
+    body: JSON.stringify(input),
+  });
+  return data.settings;
+}
+
 // Any field left blank is left unchanged server-side — see
 // settings.service.ts's updateStoreSettings. Pass only the keys actually
 // being changed.
@@ -1190,9 +1359,11 @@ export async function setApiCredentials(input: {
   stripeSecretKeyTest?: string;
   stripeWebhookSecretTest?: string;
   easypostApiKeyTest?: string;
+  shipstationApiKeyTest?: string;
   stripeSecretKeyLive?: string;
   stripeWebhookSecretLive?: string;
   easypostApiKeyLive?: string;
+  shipstationApiKeyLive?: string;
 }): Promise<StoreSettings> {
   const data = await apiFetch("/api/v1/settings", {
     method: "PATCH",

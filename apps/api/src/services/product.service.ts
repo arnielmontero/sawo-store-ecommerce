@@ -60,6 +60,24 @@ async function getBestSellerProductIds(): Promise<Set<number>> {
   return new Set(rows.map((r) => r.productId));
 }
 
+// Average rating + review count per product, computed live from Review rows
+// (never stored/denormalized) so it's always exact and never needs a
+// backfill when a review is added or removed. Storefront callers show real
+// stars only for products with at least one review — a product with none
+// gets no rating displayed, never a fabricated default.
+async function getRatingsByProductIds(productIds: number[]): Promise<Map<number, { average: number; count: number }>> {
+  if (productIds.length === 0) return new Map();
+  const rows = await prisma.review.groupBy({
+    by: ["productId"],
+    where: { productId: { in: productIds } },
+    _avg: { rating: true },
+    _count: { rating: true },
+  });
+  return new Map(
+    rows.map((row) => [row.productId, { average: row._avg.rating ?? 0, count: row._count.rating }])
+  );
+}
+
 function isNewProduct(createdAt: Date): boolean {
   const ageMs = Date.now() - createdAt.getTime();
   return ageMs <= NEW_PRODUCT_DAYS * 24 * 60 * 60 * 1000;
@@ -213,7 +231,10 @@ export async function listProducts(filters: ListProductsFilters) {
     ]);
   }
 
-  const bestSellerIds = await getBestSellerProductIds();
+  const [bestSellerIds, ratings] = await Promise.all([
+    getBestSellerProductIds(),
+    getRatingsByProductIds(rawProducts.map((p) => p.id)),
+  ]);
 
   // variantCount/totalStock are a convenience for list views (e.g. the admin
   // Catalog table) so they don't need a second request per product just to
@@ -226,6 +247,7 @@ export async function listProducts(filters: ListProductsFilters) {
   const products = rawProducts.map((product) => {
     const flat = withFlatTags(product);
     const featured = flat.images.find((img) => img.isFeatured) ?? flat.images[0];
+    const rating = ratings.get(flat.id);
     const { variants, anyOnSale } = annotateVariantSales(
       flat.variants,
       flat.compareAtPriceCents,
@@ -234,6 +256,8 @@ export async function listProducts(filters: ListProductsFilters) {
     );
     return {
       ...flat,
+      rating: rating?.average ?? null,
+      reviewCount: rating?.count ?? 0,
       variants,
       variantCount: flat.variants.length,
       totalStock: flat.variants.reduce((sum, variant) => sum + (variant.inventory?.stockQuantity ?? 0), 0),
@@ -416,6 +440,9 @@ export interface UpdateProductInput {
     priceCents: number;
     attributes?: Record<string, unknown>;
     imageUrl?: string | null;
+    // Shipping weight in ounces — see the schema comment on
+    // ProductVariant.weight. null clears it back to the default fallback.
+    weight?: number | null;
     // Per-variant deal override — see the schema comment on
     // ProductVariant.compareAtPriceCents. Omitting these keys leaves the
     // variant's existing deal untouched; pass null to clear one.
@@ -440,6 +467,7 @@ export async function updateProduct(id: number, input: UpdateProductInput) {
               priceCents: variant.priceCents,
               attributes: variant.attributes as Prisma.InputJsonValue | undefined,
               imageUrl: variant.imageUrl,
+              weight: variant.weight,
               compareAtPriceCents: variant.compareAtPriceCents,
               saleStartsAt:
                 variant.saleStartsAt === undefined ? undefined : variant.saleStartsAt ? new Date(variant.saleStartsAt) : null,
@@ -454,6 +482,7 @@ export async function updateProduct(id: number, input: UpdateProductInput) {
               priceCents: variant.priceCents,
               attributes: variant.attributes as Prisma.InputJsonValue | undefined,
               imageUrl: variant.imageUrl,
+              weight: variant.weight,
               compareAtPriceCents: variant.compareAtPriceCents,
               saleStartsAt: variant.saleStartsAt ? new Date(variant.saleStartsAt) : null,
               saleEndsAt: variant.saleEndsAt ? new Date(variant.saleEndsAt) : null,
@@ -667,6 +696,17 @@ export async function generateVariantMatrix(productId: number, options: VariantO
   return getProductById(productId);
 }
 
+// Review.authorName holds a snapshot of the purchasing customer's EMAIL
+// (see the Review model + review.service.ts's logReview). That's fine for
+// the admin queue, but publishing raw customer emails on a public product
+// page would leak PII to anyone browsing the storefront, so the public
+// payload only ever carries a masked display name.
+function publicAuthorName(authorName: string): string {
+  const local = authorName.includes("@") ? authorName.split("@")[0] : authorName;
+  if (local.length <= 2) return `${local.charAt(0).toUpperCase()}.`;
+  return `${local.charAt(0).toUpperCase() + local.slice(1, 2)}${"*".repeat(Math.min(local.length - 2, 6))}`;
+}
+
 export async function getProductBySlug(slug: string) {
   const product = await prisma.product.findFirst({
     where: { slug, isActive: true },
@@ -676,11 +716,20 @@ export async function getProductBySlug(slug: string) {
       // visible/selectable here even though its parent product is active.
       variants: { where: { isActive: true }, include: { inventory: true } },
       images: { orderBy: { position: "asc" } },
+      // Real admin-recorded reviews, newest first, rendered on the PDP.
+      reviews: { orderBy: { createdAt: "desc" } },
+      // Only ANSWERED questions are public — an unanswered one is still
+      // sitting in the admin's Q&A queue and isn't customer-facing yet.
+      questions: { where: { answeredAt: { not: null } }, orderBy: { answeredAt: "desc" } },
     },
   });
   if (!product) return null;
 
-  const bestSellerIds = await getBestSellerProductIds();
+  const [bestSellerIds, ratings] = await Promise.all([
+    getBestSellerProductIds(),
+    getRatingsByProductIds([product.id]),
+  ]);
+  const rating = ratings.get(product.id);
   const { variants: saleVariants, anyOnSale } = annotateVariantSales(
     product.variants,
     product.compareAtPriceCents,
@@ -696,6 +745,26 @@ export async function getProductBySlug(slug: string) {
         ? variant.inventory.stockQuantity - variant.inventory.reservedQuantity
         : 0,
     })),
+    // Reshaped rather than spread straight through: drops userId/raw email
+    // so nothing customer-identifying reaches the public storefront.
+    reviews: product.reviews.map((review) => ({
+      id: review.id,
+      authorName: publicAuthorName(review.authorName),
+      rating: review.rating,
+      body: review.body,
+      createdAt: review.createdAt,
+    })),
+    questions: product.questions.map((question) => ({
+      id: question.id,
+      authorName: publicAuthorName(question.authorName),
+      question: question.question,
+      answer: question.answer,
+      answeredByName: question.answeredByName,
+      answeredAt: question.answeredAt,
+      createdAt: question.createdAt,
+    })),
+    rating: rating?.average ?? null,
+    reviewCount: rating?.count ?? 0,
     isBestSeller: bestSellerIds.has(product.id),
     isNew: isNewProduct(product.createdAt),
     isOnSale:

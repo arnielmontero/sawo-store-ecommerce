@@ -17,6 +17,7 @@ export function AddVariantForm({
   const [price, setPrice] = useState("");
   const [size, setSize] = useState("");
   const [color, setColor] = useState("");
+  const [weight, setWeight] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -39,7 +40,14 @@ export function AddVariantForm({
     setSaving(true);
     try {
       const product = await updateProduct(productId, {
-        variants: [{ sku: sku.trim(), priceCents, attributes: Object.keys(attributes).length > 0 ? attributes : undefined }],
+        variants: [
+          {
+            sku: sku.trim(),
+            priceCents,
+            attributes: Object.keys(attributes).length > 0 ? attributes : undefined,
+            weight: weight ? Number(weight) : undefined,
+          },
+        ],
       });
       onAdded(product);
       setOpen(false);
@@ -47,6 +55,7 @@ export function AddVariantForm({
       setPrice("");
       setSize("");
       setColor("");
+      setWeight("");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to add variant.");
     } finally {
@@ -103,6 +112,17 @@ export function AddVariantForm({
           value={price}
           onChange={(e) => setPrice(e.target.value)}
           className="mt-1 w-28 rounded-md border border-ink-100 px-2 py-1.5 text-sm outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
+        />
+      </div>
+      <div>
+        <label className="block text-xs text-ink-500">Weight (oz)</label>
+        <input
+          type="number"
+          min="0"
+          value={weight}
+          onChange={(e) => setWeight(e.target.value)}
+          placeholder="16"
+          className="mt-1 w-20 rounded-md border border-ink-100 px-2 py-1.5 text-sm outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
         />
       </div>
       {error && <span className="pb-2 text-sm text-brand-600">{error}</span>}

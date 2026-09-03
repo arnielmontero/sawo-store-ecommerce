@@ -1,6 +1,19 @@
 import { OrderStatus, Prisma } from "@prisma/client";
 import { prisma } from "../lib/prisma";
 import { getEasypost } from "../lib/easypost";
+import {
+  createShipEngineTracker,
+  getShipEngineTrackingStatus,
+  toCarrierCode,
+  parseShippingAddress,
+  getConnectedCarrierNames,
+  buyShipEngineLabel as buyShipEngineLabelLib,
+  getShipEngineRateQuote,
+  downloadAndStoreLabel,
+  DEFAULT_WEIGHT_OZ,
+} from "../lib/shipengine";
+import { getDeliveryProvider } from "../lib/credentials";
+import { getRawStoreSettings } from "./settings.service";
 import { HttpError } from "../middleware/errorHandler";
 import { updateOrderStatus } from "./order.service";
 import { toXlsx } from "../lib/xlsx";
@@ -36,7 +49,7 @@ function buildShipmentsWhere(tab: ShipmentTab, filters: ListShipmentsFilters): P
     tab === "pending"
       ? { status: OrderStatus.PAID }
       : tab === "in-transit"
-      ? { status: { in: [OrderStatus.SHIPPED, OrderStatus.DELIVERED] }, easypostTrackerId: { not: null } }
+      ? { status: { in: [OrderStatus.SHIPPED, OrderStatus.DELIVERED] }, trackingProvider: { not: null } }
       : { status: { in: [OrderStatus.DELIVERED, OrderStatus.RETURNED] } };
 
   return {
@@ -100,6 +113,7 @@ const SHIPMENT_SELECT = {
   trackingNumber: true,
   easypostTrackingUrl: true,
   deliveryStatus: true,
+  labelUrl: true,
   items: { select: { id: true, variantId: true, quantity: true, unitPriceCents: true } },
 } satisfies Prisma.OrderSelect;
 
@@ -191,7 +205,7 @@ export async function getShipmentStatistics() {
   const [pendingCount, inTransitCount, deliveredThisWeekCount, shipTimeSample] = await Promise.all([
     prisma.order.count({ where: { status: OrderStatus.PAID } }),
     prisma.order.count({
-      where: { status: { in: [OrderStatus.SHIPPED, OrderStatus.DELIVERED] }, easypostTrackerId: { not: null } },
+      where: { status: { in: [OrderStatus.SHIPPED, OrderStatus.DELIVERED] }, trackingProvider: { not: null } },
     }),
     prisma.order.count({ where: { status: OrderStatus.DELIVERED, updatedAt: { gte: sevenDaysAgo } } }),
     // Avg paid->shipped time, computed in JS from a bounded sample rather
@@ -223,7 +237,7 @@ export async function getShipmentStatistics() {
   return { pendingCount, inTransitCount, deliveredThisWeekCount, avgPaidToShipHours };
 }
 
-// ── EasyPost tracker mutations (unchanged behavior) ────────────────────
+// ── Tracker mutations (provider-agnostic) ───────────────────────────────
 
 // EasyPost test-mode trackers deterministically walk through pre_transit ->
 // in_transit -> out_for_delivery -> delivered based on the tracking_code's
@@ -238,7 +252,7 @@ const EASYPOST_TEST_TRACKING_CODE = "EZ2000000002";
 // best-effort — a failure here (no API key configured, EasyPost down) never
 // blocks the order actually being marked shipped, same "nice-to-have
 // display detail" tradeoff as payment.service.ts's recordCardMetadata.
-async function createTracker(trackingNumber: string, carrier: string | null) {
+async function createEasyPostTracker(trackingNumber: string, carrier: string | null) {
   const easypost = await getEasypost();
   if (!easypost) return null;
   try {
@@ -253,56 +267,239 @@ async function createTracker(trackingNumber: string, carrier: string | null) {
   }
 }
 
+// Shared tail for both shipOrder (manual entry) and buyShipEngineLabel
+// (auto-generated via a real label purchase) — writes the tracking fields
+// onto the order and flips it to SHIPPED. Neither caller's remaining logic
+// (how trackingNumber/carrier/tracking fields get produced) is duplicated
+// here — this only covers the part both flows end with identically.
+async function finalizeShipment(orderId: number, data: Prisma.OrderUpdateInput) {
+  await prisma.order.update({ where: { id: orderId }, data });
+  return updateOrderStatus(orderId, OrderStatus.SHIPPED);
+}
+
 // Sets the tracking number and moves the order to SHIPPED in one step —
 // matches how a fulfillment person actually works ("I packed it, here's the
 // tracking number, mark it shipped"), rather than two separate calls. Also
-// creates a real EasyPost tracker so the Deliveries page can show live
+// registers the order with whichever provider is currently selected
+// (StoreSettings.deliveryProvider) so the Deliveries page can show live
 // status afterward; carrierOverride lets staff correct the auto-assigned
 // carrier (see carrier.service.ts's assignCarrier) at ship time.
+//
+// This is the MANUAL-entry flow — the caller already has a tracking number
+// from somewhere outside this app. For ShipStation/ShipEngine, the label
+// purchase flow (buyShipEngineLabel below) that GENERATES a tracking number
+// automatically is preferred; this function still exists because EasyPost
+// has no purchase-a-label integration in this app, only tracking.
 export async function shipOrder(orderId: number, trackingNumber: string, carrierOverride?: string) {
   const order = await prisma.order.findUnique({ where: { id: orderId } });
   if (!order) throw new HttpError(404, "Order not found");
 
   const carrier = carrierOverride ?? order.carrier;
-  const tracker = await createTracker(trackingNumber, carrier);
+  const provider = await getDeliveryProvider();
 
-  await prisma.order.update({
-    where: { id: orderId },
-    data: {
-      trackingNumber,
-      carrier,
-      easypostTrackerId: tracker?.id ?? null,
-      easypostTrackingUrl: tracker?.public_url ?? null,
-      deliveryStatus: tracker?.status ?? null,
-    },
-  });
+  const data: Prisma.OrderUpdateInput = { trackingNumber, carrier };
 
-  return updateOrderStatus(orderId, OrderStatus.SHIPPED);
+  if (provider === "SHIPSTATION") {
+    const ref = await createShipEngineTracker(trackingNumber, carrier);
+    data.trackingProvider = ref ? "SHIPSTATION" : null;
+    data.easypostTrackerId = null;
+    data.easypostTrackingUrl = null;
+    data.deliveryStatus = null;
+  } else {
+    const tracker = await createEasyPostTracker(trackingNumber, carrier);
+    data.trackingProvider = tracker ? "EASYPOST" : null;
+    data.easypostTrackerId = tracker?.id ?? null;
+    data.easypostTrackingUrl = tracker?.public_url ?? null;
+    data.deliveryStatus = tracker?.status ?? null;
+  }
+
+  return finalizeShipment(orderId, data);
 }
 
-// Refreshes deliveryStatus from EasyPost's own tracker.status — called when
-// the Deliveries page loads so staff see live progress rather than a
-// snapshot from the moment it shipped. Best-effort per order: one failed
-// lookup shouldn't block the rest of the list from refreshing.
+// ── ShipEngine label purchase (ShipStation only) ────────────────────────
+
+// No side effects, no ShipEngine API call — loads the order, runs the
+// best-effort address parser, and returns the connected-carrier list, so
+// the admin can review/edit the parsed address BEFORE any label is bought.
+// Powers the "Buy label" review panel on the Deliveries Pending tab.
+export async function previewLabelAddress(orderId: number) {
+  const order = await prisma.order.findUnique({ where: { id: orderId } });
+  if (!order) throw new HttpError(404, "Order not found");
+
+  const parsed = parseShippingAddress(order.shippingAddress);
+  const availableCarriers = await getConnectedCarrierNames();
+
+  return { ...parsed, carrier: order.carrier, availableCarriers };
+}
+
+interface BuyLabelAddressOverride {
+  street1?: string;
+  street2?: string;
+  city?: string;
+  state?: string;
+  postalCode?: string;
+}
+
+// Shared by getLabelQuote and buyShipEngineLabel — both need the exact same
+// carrier/shipTo/shipFrom/weight resolution, and a quote is only meaningful
+// if it's guaranteed to describe the same shipment the purchase call right
+// after it will actually buy. Throws the same validation errors either way
+// (missing carrier, unconfigured ship-from address, unparseable address) so
+// a quote request surfaces a problem exactly as early as a purchase would.
+async function resolveShipmentInputs(orderId: number, carrierOverride?: string, addressOverride?: BuyLabelAddressOverride) {
+  const order = await prisma.order.findUnique({
+    where: { id: orderId },
+    include: { items: { include: { variant: true } }, user: { select: { name: true, phone: true } } },
+  });
+  if (!order) throw new HttpError(404, "Order not found");
+
+  const carrier = carrierOverride ?? order.carrier;
+  if (!carrier) throw new HttpError(400, "This order has no carrier assigned — pick one before buying a label");
+
+  const settings = await getRawStoreSettings();
+  if (
+    !settings.shipFromName ||
+    !settings.shipFromStreet1 ||
+    !settings.shipFromCity ||
+    !settings.shipFromState ||
+    !settings.shipFromZip
+  ) {
+    throw new HttpError(400, "Configure a ship-from address in Configuration before buying labels");
+  }
+
+  const parsed = { ...parseShippingAddress(order.shippingAddress), ...addressOverride };
+  if (!parsed.street1 || !parsed.city || !parsed.state || !parsed.postalCode) {
+    throw new HttpError(
+      400,
+      "Couldn't parse a complete address from this order — review and fill in the missing fields, then try again"
+    );
+  }
+
+  const totalWeightOz = order.items.reduce(
+    (sum, item) => sum + (item.variant.weight ?? DEFAULT_WEIGHT_OZ) * item.quantity,
+    0
+  );
+
+  return {
+    carrier,
+    shipTo: {
+      ...parsed,
+      name: order.user?.name || "Customer",
+      phone: order.user?.phone ?? undefined,
+      country: order.shippingCountry ?? "US",
+    },
+    shipFrom: {
+      name: settings.shipFromName,
+      phone: settings.shipFromPhone ?? undefined,
+      street1: settings.shipFromStreet1,
+      street2: settings.shipFromStreet2 ?? undefined,
+      city: settings.shipFromCity,
+      state: settings.shipFromState,
+      postalCode: settings.shipFromZip,
+      country: settings.shipFromCountry ?? "US",
+    },
+    weightOunces: totalWeightOz > 0 ? totalWeightOz : DEFAULT_WEIGHT_OZ,
+  };
+}
+
+// Real price quote — NO purchase, NO tracking number generated, safe to
+// call repeatedly while the admin reviews/edits the address in the "Buy
+// label" panel. See lib/shipengine.ts's getShipEngineRateQuote. This is
+// what makes "Confirm purchase" an informed decision instead of a blind
+// one — the panel calls this whenever the reviewed carrier/address
+// changes, showing the real price and service before any money moves.
+export async function getLabelQuote(orderId: number, carrierOverride?: string, addressOverride?: BuyLabelAddressOverride) {
+  const inputs = await resolveShipmentInputs(orderId, carrierOverride, addressOverride);
+  return getShipEngineRateQuote(inputs);
+}
+
+// Buys a REAL ShipEngine label for this order, downloads the label PDF into
+// this app's own uploads dir, and marks the order SHIPPED with the
+// tracking number the purchase produced — this is the auto-generate flow
+// requested to replace manual tracking-number entry for ShipStation
+// orders. addressOverride carries whatever the admin edited in the review
+// panel; when absent, the best-effort parse of order.shippingAddress is
+// trusted as-is. Errors are NOT swallowed anywhere in this path (unlike
+// shipOrder's best-effort tracker creation) — a label purchase spends real
+// money, so a failure must reach the admin with a clear reason, never a
+// silent no-op.
+export async function buyShipEngineLabel(
+  orderId: number,
+  carrierOverride?: string,
+  addressOverride?: BuyLabelAddressOverride
+) {
+  const inputs = await resolveShipmentInputs(orderId, carrierOverride, addressOverride);
+  const result = await buyShipEngineLabelLib(inputs);
+  const labelUrl = await downloadAndStoreLabel(result.labelPdfUrl);
+
+  return finalizeShipment(orderId, {
+    trackingNumber: result.trackingNumber,
+    carrier: inputs.carrier,
+    trackingProvider: "SHIPSTATION",
+    labelPurchasedAt: new Date(),
+    labelUrl,
+    shipEngineLabelId: result.labelId,
+    shippingCostCents: result.shipmentCostCents,
+    shippingCostCurrency: result.shipmentCostCurrency,
+    easypostTrackingUrl: result.trackingUrl,
+    easypostTrackerId: null,
+    deliveryStatus: null,
+  });
+}
+
+// Refreshes deliveryStatus from whichever provider tracked this order at
+// ship time (order.trackingProvider — set once in shipOrder, not re-derived
+// from the current StoreSettings.deliveryProvider, since switching the
+// provider later shouldn't change how an already-shipped order is tracked).
+// Called when the Deliveries page loads so staff see live progress rather
+// than a snapshot from the moment it shipped. Best-effort per order: one
+// failed lookup shouldn't block the rest of the list from refreshing.
 export async function refreshDeliveryStatus(orderId: number) {
   const order = await prisma.order.findUnique({ where: { id: orderId } });
-  if (!order?.easypostTrackerId) return order;
-  const easypost = await getEasypost();
-  if (!easypost) return order;
+  if (!order?.trackingProvider) return order;
 
   try {
-    const tracker = await easypost.Tracker.retrieve(order.easypostTrackerId);
+    const result = await getTrackingStatus(order);
+    if (!result) return order;
+
     const updated = await prisma.order.update({
       where: { id: orderId },
-      data: { deliveryStatus: tracker.status },
+      data: {
+        deliveryStatus: result.status,
+        // ShipEngine returns its own carrier-hosted tracking page per
+        // lookup (unlike EasyPost's, which is fixed at tracker-creation
+        // time) — refreshed here too so the link doesn't stay stale/null if
+        // it wasn't available yet right at ship time.
+        ...(result.trackingUrl ? { easypostTrackingUrl: result.trackingUrl } : {}),
+      },
     });
-    if (tracker.status === "delivered" && order.status === OrderStatus.SHIPPED) {
+    if (result.status === "delivered" && order.status === OrderStatus.SHIPPED) {
       return updateOrderStatus(orderId, OrderStatus.DELIVERED);
     }
     return updated;
   } catch {
     return order;
   }
+}
+
+async function getTrackingStatus(order: {
+  trackingProvider: string | null;
+  easypostTrackerId: string | null;
+  carrier: string | null;
+  trackingNumber: string | null;
+}): Promise<{ status: string; trackingUrl: string | null } | null> {
+  if (order.trackingProvider === "SHIPSTATION") {
+    const carrierCode = toCarrierCode(order.carrier);
+    if (!carrierCode || !order.trackingNumber) return null;
+    const result = await getShipEngineTrackingStatus({ carrierCode, trackingNumber: order.trackingNumber });
+    return result ? { status: result.status, trackingUrl: result.trackingUrl } : null;
+  }
+
+  if (!order.easypostTrackerId) return null;
+  const easypost = await getEasypost();
+  if (!easypost) return null;
+  const tracker = await easypost.Tracker.retrieve(order.easypostTrackerId);
+  return tracker.status ? { status: tracker.status, trackingUrl: null } : null;
 }
 
 export async function refreshAllDeliveryStatuses() {

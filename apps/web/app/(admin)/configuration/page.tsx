@@ -7,6 +7,8 @@ import {
   removeStoreLogo,
   setAllowPartialRefunds,
   setDefaultCarrier,
+  setDeliveryProvider,
+  setShipFromAddress,
   setApiCredentials,
   setApiEnvironment,
   fetchCarrierRules,
@@ -24,6 +26,7 @@ import {
   type TaxRule,
   type PaymentMethod,
   type ApiEnvironment,
+  type DeliveryProvider,
 } from "@/lib/api";
 import { useStoreSettings } from "@/lib/store-settings-context";
 import { useAuth } from "@/lib/auth-context";
@@ -55,15 +58,31 @@ export default function ConfigurationPage() {
   const [stripeSecretKeyTestInput, setStripeSecretKeyTestInput] = useState("");
   const [stripeWebhookSecretTestInput, setStripeWebhookSecretTestInput] = useState("");
   const [easypostApiKeyTestInput, setEasypostApiKeyTestInput] = useState("");
+  const [shipstationApiKeyTestInput, setShipstationApiKeyTestInput] = useState("");
   const [stripeSecretKeyLiveInput, setStripeSecretKeyLiveInput] = useState("");
   const [stripeWebhookSecretLiveInput, setStripeWebhookSecretLiveInput] = useState("");
   const [easypostApiKeyLiveInput, setEasypostApiKeyLiveInput] = useState("");
+  const [shipstationApiKeyLiveInput, setShipstationApiKeyLiveInput] = useState("");
   const [credentialsSaving, setCredentialsSaving] = useState(false);
   const [credentialsError, setCredentialsError] = useState<string | null>(null);
   const [credentialsSaved, setCredentialsSaved] = useState(false);
   const [environmentSwitching, setEnvironmentSwitching] = useState(false);
   const [environmentError, setEnvironmentError] = useState<string | null>(null);
   const [pendingProductionConfirm, setPendingProductionConfirm] = useState(false);
+  const [providerSaving, setProviderSaving] = useState(false);
+  const [providerError, setProviderError] = useState<string | null>(null);
+
+  const [shipFromName, setShipFromName] = useState("");
+  const [shipFromPhone, setShipFromPhone] = useState("");
+  const [shipFromStreet1, setShipFromStreet1] = useState("");
+  const [shipFromStreet2, setShipFromStreet2] = useState("");
+  const [shipFromCity, setShipFromCity] = useState("");
+  const [shipFromState, setShipFromState] = useState("");
+  const [shipFromZip, setShipFromZip] = useState("");
+  const [shipFromCountry, setShipFromCountry] = useState("US");
+  const [shipFromSaving, setShipFromSaving] = useState(false);
+  const [shipFromError, setShipFromError] = useState<string | null>(null);
+  const [shipFromSaved, setShipFromSaved] = useState(false);
 
   const [carrierRules, setCarrierRules] = useState<CarrierRule[]>([]);
   const [rulesLoading, setRulesLoading] = useState(true);
@@ -125,6 +144,24 @@ export default function ConfigurationPage() {
 
   useEffect(() => {
     if (settings) setStoreName(settings.storeName);
+  }, [settings]);
+
+  // Seeded once when settings first load — after that, local state is the
+  // source of truth while the admin is editing (same as storeName above),
+  // only re-synced by handleSaveShipFrom's own setSettings call on success.
+  const shipFromLoadedRef = useRef(false);
+  useEffect(() => {
+    if (settings && !shipFromLoadedRef.current) {
+      shipFromLoadedRef.current = true;
+      setShipFromName(settings.shipFromName ?? "");
+      setShipFromPhone(settings.shipFromPhone ?? "");
+      setShipFromStreet1(settings.shipFromStreet1 ?? "");
+      setShipFromStreet2(settings.shipFromStreet2 ?? "");
+      setShipFromCity(settings.shipFromCity ?? "");
+      setShipFromState(settings.shipFromState ?? "");
+      setShipFromZip(settings.shipFromZip ?? "");
+      setShipFromCountry(settings.shipFromCountry ?? "US");
+    }
   }, [settings]);
 
   const canEdit = hasPermission(user, "configuration", "edit");
@@ -196,10 +233,12 @@ export default function ConfigurationPage() {
       if (stripeSecretKeyTestInput.trim()) input.stripeSecretKeyTest = stripeSecretKeyTestInput.trim();
       if (stripeWebhookSecretTestInput.trim()) input.stripeWebhookSecretTest = stripeWebhookSecretTestInput.trim();
       if (easypostApiKeyTestInput.trim()) input.easypostApiKeyTest = easypostApiKeyTestInput.trim();
+      if (shipstationApiKeyTestInput.trim()) input.shipstationApiKeyTest = shipstationApiKeyTestInput.trim();
     } else {
       if (stripeSecretKeyLiveInput.trim()) input.stripeSecretKeyLive = stripeSecretKeyLiveInput.trim();
       if (stripeWebhookSecretLiveInput.trim()) input.stripeWebhookSecretLive = stripeWebhookSecretLiveInput.trim();
       if (easypostApiKeyLiveInput.trim()) input.easypostApiKeyLive = easypostApiKeyLiveInput.trim();
+      if (shipstationApiKeyLiveInput.trim()) input.shipstationApiKeyLive = shipstationApiKeyLiveInput.trim();
     }
     if (Object.keys(input).length === 0) {
       setCredentialsError("Enter at least one key to save.");
@@ -212,9 +251,11 @@ export default function ConfigurationPage() {
       setStripeSecretKeyTestInput("");
       setStripeWebhookSecretTestInput("");
       setEasypostApiKeyTestInput("");
+      setShipstationApiKeyTestInput("");
       setStripeSecretKeyLiveInput("");
       setStripeWebhookSecretLiveInput("");
       setEasypostApiKeyLiveInput("");
+      setShipstationApiKeyLiveInput("");
       setCredentialsSaved(true);
     } catch (err) {
       setCredentialsError(err instanceof Error ? err.message : "Failed to save credentials.");
@@ -246,6 +287,47 @@ export default function ConfigurationPage() {
       setRuleError(err instanceof Error ? err.message : "Failed to update default carrier.");
     } finally {
       setDefaultCarrierSaving(false);
+    }
+  }
+
+  async function handleDeliveryProviderChange(next: DeliveryProvider) {
+    setProviderError(null);
+    setProviderSaving(true);
+    try {
+      const updated = await setDeliveryProvider(next);
+      setSettings(updated);
+    } catch (err) {
+      setProviderError(err instanceof Error ? err.message : "Failed to update delivery provider.");
+    } finally {
+      setProviderSaving(false);
+    }
+  }
+
+  async function handleSaveShipFrom() {
+    setShipFromError(null);
+    setShipFromSaved(false);
+    if (!shipFromName.trim() || !shipFromStreet1.trim() || !shipFromCity.trim() || !shipFromState.trim() || !shipFromZip.trim()) {
+      setShipFromError("Name, Street 1, City, State, and Zip are required.");
+      return;
+    }
+    setShipFromSaving(true);
+    try {
+      const updated = await setShipFromAddress({
+        shipFromName: shipFromName.trim(),
+        shipFromPhone: shipFromPhone.trim() || undefined,
+        shipFromStreet1: shipFromStreet1.trim(),
+        shipFromStreet2: shipFromStreet2.trim() || undefined,
+        shipFromCity: shipFromCity.trim(),
+        shipFromState: shipFromState.trim(),
+        shipFromZip: shipFromZip.trim(),
+        shipFromCountry,
+      });
+      setSettings(updated);
+      setShipFromSaved(true);
+    } catch (err) {
+      setShipFromError(err instanceof Error ? err.message : "Failed to save the ship-from address.");
+    } finally {
+      setShipFromSaving(false);
     }
   }
 
@@ -541,6 +623,48 @@ export default function ConfigurationPage() {
         )}
         {environmentError && <p className="mt-2 text-sm text-brand-600">{environmentError}</p>}
 
+        {canEdit && (
+          <div className="mt-3 flex items-center justify-between gap-4 rounded-lg border border-ink-100 bg-gray-50 px-4 py-3">
+            <div>
+              <p className="text-sm font-medium text-ink-900">Delivery provider</p>
+              <p className="mt-0.5 text-xs text-ink-400">
+                Which service creates shipment trackers when an order is marked shipped.
+              </p>
+            </div>
+            <div className="flex shrink-0 gap-1 rounded-md border border-ink-100 bg-white p-1">
+              <button
+                onClick={() => handleDeliveryProviderChange("EASYPOST")}
+                disabled={providerSaving}
+                className={`rounded px-3 py-1.5 text-xs font-semibold transition disabled:opacity-50 ${
+                  (settings?.deliveryProvider ?? "EASYPOST") === "EASYPOST"
+                    ? "bg-brand-600 text-white"
+                    : "text-ink-500 hover:bg-gray-50"
+                }`}
+              >
+                EasyPost
+              </button>
+              <button
+                onClick={() => handleDeliveryProviderChange("SHIPSTATION")}
+                disabled={providerSaving}
+                className={`rounded px-3 py-1.5 text-xs font-semibold transition disabled:opacity-50 ${
+                  settings?.deliveryProvider === "SHIPSTATION"
+                    ? "bg-brand-600 text-white"
+                    : "text-ink-500 hover:bg-gray-50"
+                }`}
+              >
+                ShipStation
+              </button>
+            </div>
+          </div>
+        )}
+        {providerError && <p className="mt-2 text-sm text-brand-600">{providerError}</p>}
+        {settings?.deliveryProvider === "SHIPSTATION" && (
+          <p className="mt-2 text-xs text-amber-600">
+            ShipStation credentials can be saved below, but shipment tracking isn&apos;t wired up to ShipStation yet —
+            orders marked shipped won&apos;t create a tracker until that integration is built.
+          </p>
+        )}
+
         {pendingProductionConfirm && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
             <div className="w-full max-w-sm rounded-xl bg-white p-6 shadow-xl">
@@ -589,96 +713,153 @@ export default function ConfigurationPage() {
         </div>
 
         {canEdit ? (
-          <div className="mt-4 space-y-4">
+          <div className="mt-4 space-y-5">
             {credentialTab === "SANDBOX" ? (
               <>
-                <div>
-                  <label className="block text-xs font-medium uppercase tracking-wide text-ink-500">
-                    Stripe secret key (test){" "}
-                    {settings?.stripeSecretKeyTestSet && <span className="text-emerald-600">(configured)</span>}
-                  </label>
-                  <input
-                    type="password"
-                    value={stripeSecretKeyTestInput}
-                    onChange={(e) => setStripeSecretKeyTestInput(e.target.value)}
-                    placeholder={settings?.stripeSecretKeyTestSet ? "•••••••••••••••• (leave blank to keep)" : "sk_test_..."}
-                    className="mt-1 w-full rounded-md border border-ink-100 px-3 py-2 text-sm font-mono outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
-                  />
+                <div className="space-y-3">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-ink-400">Payments — Stripe</p>
+                  <div>
+                    <label className="block text-xs font-medium uppercase tracking-wide text-ink-500">
+                      Secret key (test){" "}
+                      {settings?.stripeSecretKeyTestSet && <span className="text-emerald-600">(configured)</span>}
+                    </label>
+                    <input
+                      type="password"
+                      value={stripeSecretKeyTestInput}
+                      onChange={(e) => setStripeSecretKeyTestInput(e.target.value)}
+                      placeholder={settings?.stripeSecretKeyTestSet ? "•••••••••••••••• (leave blank to keep)" : "sk_test_..."}
+                      className="mt-1 w-full rounded-md border border-ink-100 px-3 py-2 text-sm font-mono outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium uppercase tracking-wide text-ink-500">
+                      Webhook secret (test){" "}
+                      {settings?.stripeWebhookSecretTestSet && <span className="text-emerald-600">(configured)</span>}
+                    </label>
+                    <input
+                      type="password"
+                      value={stripeWebhookSecretTestInput}
+                      onChange={(e) => setStripeWebhookSecretTestInput(e.target.value)}
+                      placeholder={settings?.stripeWebhookSecretTestSet ? "•••••••••••••••• (leave blank to keep)" : "whsec_..."}
+                      className="mt-1 w-full rounded-md border border-ink-100 px-3 py-2 text-sm font-mono outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
+                    />
+                  </div>
                 </div>
-                <div>
-                  <label className="block text-xs font-medium uppercase tracking-wide text-ink-500">
-                    Stripe webhook secret (test){" "}
-                    {settings?.stripeWebhookSecretTestSet && <span className="text-emerald-600">(configured)</span>}
-                  </label>
-                  <input
-                    type="password"
-                    value={stripeWebhookSecretTestInput}
-                    onChange={(e) => setStripeWebhookSecretTestInput(e.target.value)}
-                    placeholder={settings?.stripeWebhookSecretTestSet ? "•••••••••••••••• (leave blank to keep)" : "whsec_..."}
-                    className="mt-1 w-full rounded-md border border-ink-100 px-3 py-2 text-sm font-mono outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium uppercase tracking-wide text-ink-500">
-                    EasyPost API key (test){" "}
-                    {settings?.easypostApiKeyTestSet && <span className="text-emerald-600">(configured)</span>}
-                  </label>
-                  <p className="mt-1 text-xs text-ink-400">
-                    Powers live shipment tracking on Deliveries. Free test key from{" "}
-                    <a href="https://www.easypost.com/" target="_blank" rel="noreferrer" className="text-brand-600 hover:underline">
-                      easypost.com
-                    </a>{" "}
-                    — dashboard → API Keys → Test API Key.
+
+                <div className="space-y-3 border-t border-ink-100 pt-4">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-ink-400">
+                    Shipment tracking — {settings?.deliveryProvider === "SHIPSTATION" ? "ShipStation" : "EasyPost"}
                   </p>
-                  <input
-                    type="password"
-                    value={easypostApiKeyTestInput}
-                    onChange={(e) => setEasypostApiKeyTestInput(e.target.value)}
-                    placeholder={settings?.easypostApiKeyTestSet ? "•••••••••••••••• (leave blank to keep)" : "EZTK..."}
-                    className="mt-1 w-full rounded-md border border-ink-100 px-3 py-2 text-sm font-mono outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
-                  />
+                  {settings?.deliveryProvider === "SHIPSTATION" ? (
+                    <div>
+                      <label className="block text-xs font-medium uppercase tracking-wide text-ink-500">
+                        ShipStation API key (test){" "}
+                        {settings?.shipstationApiKeyTestSet && <span className="text-emerald-600">(configured)</span>}
+                      </label>
+                      <p className="mt-1 text-xs text-ink-400">
+                        From{" "}
+                        <a href="https://www.shipstation.com/" target="_blank" rel="noreferrer" className="text-brand-600 hover:underline">
+                          shipstation.com
+                        </a>{" "}
+                        — Settings → Account → API Settings.
+                      </p>
+                      <input
+                        type="password"
+                        value={shipstationApiKeyTestInput}
+                        onChange={(e) => setShipstationApiKeyTestInput(e.target.value)}
+                        placeholder={settings?.shipstationApiKeyTestSet ? "•••••••••••••••• (leave blank to keep)" : "API key"}
+                        className="mt-1 w-full rounded-md border border-ink-100 px-3 py-2 text-sm font-mono outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
+                      />
+                    </div>
+                  ) : (
+                    <div>
+                      <label className="block text-xs font-medium uppercase tracking-wide text-ink-500">
+                        EasyPost API key (test){" "}
+                        {settings?.easypostApiKeyTestSet && <span className="text-emerald-600">(configured)</span>}
+                      </label>
+                      <p className="mt-1 text-xs text-ink-400">
+                        Powers live shipment tracking on Deliveries. Free test key from{" "}
+                        <a href="https://www.easypost.com/" target="_blank" rel="noreferrer" className="text-brand-600 hover:underline">
+                          easypost.com
+                        </a>{" "}
+                        — dashboard → API Keys → Test API Key.
+                      </p>
+                      <input
+                        type="password"
+                        value={easypostApiKeyTestInput}
+                        onChange={(e) => setEasypostApiKeyTestInput(e.target.value)}
+                        placeholder={settings?.easypostApiKeyTestSet ? "•••••••••••••••• (leave blank to keep)" : "EZTK..."}
+                        className="mt-1 w-full rounded-md border border-ink-100 px-3 py-2 text-sm font-mono outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
+                      />
+                    </div>
+                  )}
                 </div>
               </>
             ) : (
               <>
-                <div>
-                  <label className="block text-xs font-medium uppercase tracking-wide text-ink-500">
-                    Stripe secret key (live){" "}
-                    {settings?.stripeSecretKeyLiveSet && <span className="text-emerald-600">(configured)</span>}
-                  </label>
-                  <input
-                    type="password"
-                    value={stripeSecretKeyLiveInput}
-                    onChange={(e) => setStripeSecretKeyLiveInput(e.target.value)}
-                    placeholder={settings?.stripeSecretKeyLiveSet ? "•••••••••••••••• (leave blank to keep)" : "sk_live_..."}
-                    className="mt-1 w-full rounded-md border border-ink-100 px-3 py-2 text-sm font-mono outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
-                  />
+                <div className="space-y-3">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-ink-400">Payments — Stripe</p>
+                  <div>
+                    <label className="block text-xs font-medium uppercase tracking-wide text-ink-500">
+                      Secret key (live){" "}
+                      {settings?.stripeSecretKeyLiveSet && <span className="text-emerald-600">(configured)</span>}
+                    </label>
+                    <input
+                      type="password"
+                      value={stripeSecretKeyLiveInput}
+                      onChange={(e) => setStripeSecretKeyLiveInput(e.target.value)}
+                      placeholder={settings?.stripeSecretKeyLiveSet ? "•••••••••••••••• (leave blank to keep)" : "sk_live_..."}
+                      className="mt-1 w-full rounded-md border border-ink-100 px-3 py-2 text-sm font-mono outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium uppercase tracking-wide text-ink-500">
+                      Webhook secret (live){" "}
+                      {settings?.stripeWebhookSecretLiveSet && <span className="text-emerald-600">(configured)</span>}
+                    </label>
+                    <input
+                      type="password"
+                      value={stripeWebhookSecretLiveInput}
+                      onChange={(e) => setStripeWebhookSecretLiveInput(e.target.value)}
+                      placeholder={settings?.stripeWebhookSecretLiveSet ? "•••••••••••••••• (leave blank to keep)" : "whsec_..."}
+                      className="mt-1 w-full rounded-md border border-ink-100 px-3 py-2 text-sm font-mono outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
+                    />
+                  </div>
                 </div>
-                <div>
-                  <label className="block text-xs font-medium uppercase tracking-wide text-ink-500">
-                    Stripe webhook secret (live){" "}
-                    {settings?.stripeWebhookSecretLiveSet && <span className="text-emerald-600">(configured)</span>}
-                  </label>
-                  <input
-                    type="password"
-                    value={stripeWebhookSecretLiveInput}
-                    onChange={(e) => setStripeWebhookSecretLiveInput(e.target.value)}
-                    placeholder={settings?.stripeWebhookSecretLiveSet ? "•••••••••••••••• (leave blank to keep)" : "whsec_..."}
-                    className="mt-1 w-full rounded-md border border-ink-100 px-3 py-2 text-sm font-mono outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium uppercase tracking-wide text-ink-500">
-                    EasyPost API key (live){" "}
-                    {settings?.easypostApiKeyLiveSet && <span className="text-emerald-600">(configured)</span>}
-                  </label>
-                  <input
-                    type="password"
-                    value={easypostApiKeyLiveInput}
-                    onChange={(e) => setEasypostApiKeyLiveInput(e.target.value)}
-                    placeholder={settings?.easypostApiKeyLiveSet ? "•••••••••••••••• (leave blank to keep)" : "EZAK..."}
-                    className="mt-1 w-full rounded-md border border-ink-100 px-3 py-2 text-sm font-mono outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
-                  />
+
+                <div className="space-y-3 border-t border-ink-100 pt-4">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-ink-400">
+                    Shipment tracking — {settings?.deliveryProvider === "SHIPSTATION" ? "ShipStation" : "EasyPost"}
+                  </p>
+                  {settings?.deliveryProvider === "SHIPSTATION" ? (
+                    <div>
+                      <label className="block text-xs font-medium uppercase tracking-wide text-ink-500">
+                        ShipStation API key (live){" "}
+                        {settings?.shipstationApiKeyLiveSet && <span className="text-emerald-600">(configured)</span>}
+                      </label>
+                      <input
+                        type="password"
+                        value={shipstationApiKeyLiveInput}
+                        onChange={(e) => setShipstationApiKeyLiveInput(e.target.value)}
+                        placeholder={settings?.shipstationApiKeyLiveSet ? "•••••••••••••••• (leave blank to keep)" : "API key"}
+                        className="mt-1 w-full rounded-md border border-ink-100 px-3 py-2 text-sm font-mono outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
+                      />
+                    </div>
+                  ) : (
+                    <div>
+                      <label className="block text-xs font-medium uppercase tracking-wide text-ink-500">
+                        EasyPost API key (live){" "}
+                        {settings?.easypostApiKeyLiveSet && <span className="text-emerald-600">(configured)</span>}
+                      </label>
+                      <input
+                        type="password"
+                        value={easypostApiKeyLiveInput}
+                        onChange={(e) => setEasypostApiKeyLiveInput(e.target.value)}
+                        placeholder={settings?.easypostApiKeyLiveSet ? "•••••••••••••••• (leave blank to keep)" : "EZAK..."}
+                        className="mt-1 w-full rounded-md border border-ink-100 px-3 py-2 text-sm font-mono outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
+                      />
+                    </div>
+                  )}
                 </div>
               </>
             )}
@@ -805,6 +986,114 @@ export default function ConfigurationPage() {
           )}
           {ruleError && <p className="mt-3 text-sm text-brand-600">{ruleError}</p>}
         </div>
+      </div>
+
+      <div className="mt-6 max-w-xl rounded-xl border border-ink-100 bg-white p-6">
+        <p className="text-sm font-medium text-ink-900">Ship-from address</p>
+        <p className="mt-1 text-xs text-ink-400">
+          Your store&apos;s own shipping-origin address — required before a ShipStation label can be purchased (see
+          Deliveries). Name, Street 1, City, State, and Zip are required; Street 2 and Phone are optional.
+        </p>
+
+        {canEdit ? (
+          <div className="mt-4 grid grid-cols-2 gap-3">
+            <div className="col-span-2">
+              <label className="block text-xs font-medium uppercase tracking-wide text-ink-500">Name</label>
+              <input
+                type="text"
+                value={shipFromName}
+                onChange={(e) => setShipFromName(e.target.value)}
+                placeholder="Sawo Shop Warehouse"
+                className="mt-1 w-full rounded-md border border-ink-100 px-3 py-2 text-sm outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
+              />
+            </div>
+            <div className="col-span-2">
+              <label className="block text-xs font-medium uppercase tracking-wide text-ink-500">Phone</label>
+              <input
+                type="text"
+                value={shipFromPhone}
+                onChange={(e) => setShipFromPhone(e.target.value)}
+                placeholder="+1 555-555-5555"
+                className="mt-1 w-full rounded-md border border-ink-100 px-3 py-2 text-sm outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
+              />
+            </div>
+            <div className="col-span-2">
+              <label className="block text-xs font-medium uppercase tracking-wide text-ink-500">Street 1</label>
+              <input
+                type="text"
+                value={shipFromStreet1}
+                onChange={(e) => setShipFromStreet1(e.target.value)}
+                className="mt-1 w-full rounded-md border border-ink-100 px-3 py-2 text-sm outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
+              />
+            </div>
+            <div className="col-span-2">
+              <label className="block text-xs font-medium uppercase tracking-wide text-ink-500">
+                Street 2 (optional)
+              </label>
+              <input
+                type="text"
+                value={shipFromStreet2}
+                onChange={(e) => setShipFromStreet2(e.target.value)}
+                className="mt-1 w-full rounded-md border border-ink-100 px-3 py-2 text-sm outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium uppercase tracking-wide text-ink-500">City</label>
+              <input
+                type="text"
+                value={shipFromCity}
+                onChange={(e) => setShipFromCity(e.target.value)}
+                className="mt-1 w-full rounded-md border border-ink-100 px-3 py-2 text-sm outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium uppercase tracking-wide text-ink-500">State</label>
+              <input
+                type="text"
+                value={shipFromState}
+                onChange={(e) => setShipFromState(e.target.value)}
+                placeholder="OR"
+                className="mt-1 w-full rounded-md border border-ink-100 px-3 py-2 text-sm outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium uppercase tracking-wide text-ink-500">Zip</label>
+              <input
+                type="text"
+                value={shipFromZip}
+                onChange={(e) => setShipFromZip(e.target.value)}
+                className="mt-1 w-full rounded-md border border-ink-100 px-3 py-2 text-sm outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium uppercase tracking-wide text-ink-500">Country</label>
+              <select
+                value={shipFromCountry}
+                onChange={(e) => setShipFromCountry(e.target.value)}
+                className="mt-1 w-full rounded-md border border-ink-100 px-3 py-2 text-sm outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
+              >
+                {COUNTRIES.map((c) => (
+                  <option key={c.code} value={c.code}>
+                    {c.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {shipFromError && <p className="col-span-2 text-sm text-brand-600">{shipFromError}</p>}
+            {shipFromSaved && !shipFromError && <p className="col-span-2 text-sm text-emerald-600">Saved.</p>}
+
+            <button
+              onClick={handleSaveShipFrom}
+              disabled={shipFromSaving}
+              className="col-span-2 w-fit rounded-md bg-brand-500 px-4 py-2 text-sm font-medium text-white hover:bg-brand-600 disabled:opacity-50"
+            >
+              {shipFromSaving ? "Saving..." : "Save ship-from address"}
+            </button>
+          </div>
+        ) : (
+          <p className="mt-4 text-xs text-ink-400">Only Admin users can change this setting.</p>
+        )}
       </div>
 
       <div className="mt-6 max-w-xl rounded-xl border border-ink-100 bg-white p-6">

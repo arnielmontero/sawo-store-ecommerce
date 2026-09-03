@@ -7,6 +7,9 @@ import {
   getShipmentStatistics,
   refreshAllDeliveryStatuses,
   shipOrder,
+  previewLabelAddress,
+  getLabelQuote,
+  buyShipEngineLabel,
 } from "../services/shipping.service";
 
 export const shippingRouter = Router();
@@ -104,6 +107,60 @@ shippingRouter.patch("/:orderId/ship", requirePermission("deliveries", "manage")
     const orderId = Number(req.params.orderId);
     const { trackingNumber, carrier } = shipSchema.parse(req.body);
     const order = await shipOrder(orderId, trackingNumber, carrier);
+    res.json({ order });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// No side effects, no ShipEngine call — lets the admin review the
+// best-effort parsed address before any label is purchased. See
+// previewLabelAddress in shipping.service.ts.
+shippingRouter.get("/:orderId/label-preview", requirePermission("deliveries", "manage"), async (req, res, next) => {
+  try {
+    const orderId = Number(req.params.orderId);
+    const preview = await previewLabelAddress(orderId);
+    res.json(preview);
+  } catch (err) {
+    next(err);
+  }
+});
+
+const buyLabelSchema = z.object({
+  carrier: z.string().min(1).optional(),
+  address: z
+    .object({
+      street1: z.string().min(1),
+      street2: z.string().optional(),
+      city: z.string().min(1),
+      state: z.string().min(1),
+      postalCode: z.string().min(1),
+    })
+    .optional(), // present when the admin edited the parsed fields; absent = trust the auto-parse
+});
+
+// Real price quote — no purchase, no cost, safe to call as the admin edits
+// the review panel. See getLabelQuote in shipping.service.ts. Lets
+// "Confirm purchase" be an informed decision instead of a blind one.
+shippingRouter.post("/:orderId/label-quote", requirePermission("deliveries", "manage"), async (req, res, next) => {
+  try {
+    const orderId = Number(req.params.orderId);
+    const { carrier, address } = buyLabelSchema.parse(req.body);
+    const quote = await getLabelQuote(orderId, carrier, address);
+    res.json(quote);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Buys a real ShipEngine label — costs real money on a live account. See
+// buyShipEngineLabel in shipping.service.ts for the full flow (weight sum,
+// ship-from validation, label download, order finalization).
+shippingRouter.post("/:orderId/buy-label", requirePermission("deliveries", "manage"), async (req, res, next) => {
+  try {
+    const orderId = Number(req.params.orderId);
+    const { carrier, address } = buyLabelSchema.parse(req.body);
+    const order = await buyShipEngineLabel(orderId, carrier, address);
     res.json({ order });
   } catch (err) {
     next(err);

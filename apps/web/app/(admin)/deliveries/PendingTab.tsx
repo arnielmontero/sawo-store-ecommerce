@@ -1,17 +1,23 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 import Link from "next/link";
 import {
   fetchShipments,
   exportShipmentsCsvUrl,
   shipOrder,
+  fetchLabelPreview,
+  fetchLabelQuote,
+  buyShipEngineLabel,
   type Shipment,
   type ShipmentSortField,
   type SortDir,
+  type LabelPreview,
+  type LabelQuote,
 } from "@/lib/api";
 import { formatCents } from "@/lib/format";
 import { CARRIER_OPTIONS } from "@/lib/constants";
+import { useStoreSettings } from "@/lib/store-settings-context";
 import { ShipmentFilterBar } from "./ShipmentFilterBar";
 import { OverdueBadge } from "./OverdueBadge";
 
@@ -23,6 +29,7 @@ const SORTABLE_COLUMNS: { field: ShipmentSortField; label: string }[] = [
 type BulkResult = "pending" | "shipping" | "done" | { error: string };
 
 export function PendingTab() {
+  const { settings } = useStoreSettings();
   const [orders, setOrders] = useState<Shipment[]>([]);
   const [pagination, setPagination] = useState({ page: 1, pageSize: 20, total: 0, totalPages: 1 });
   const [searchInput, setSearchInput] = useState("");
@@ -46,6 +53,24 @@ export function PendingTab() {
   const [bulkShipping, setBulkShipping] = useState(false);
   const [bulkResults, setBulkResults] = useState<Record<number, BulkResult>>({});
   const [bulkSummary, setBulkSummary] = useState<string | null>(null);
+
+  // "Buy label" review panel (ShipStation only) — replaces manual tracking-
+  // number entry with a real ShipEngine label purchase. Only one row's
+  // panel is open at a time.
+  const [labelPanelOrderId, setLabelPanelOrderId] = useState<number | null>(null);
+  const [labelPreview, setLabelPreview] = useState<LabelPreview | null>(null);
+  const [labelPreviewLoading, setLabelPreviewLoading] = useState(false);
+  const [labelCarrier, setLabelCarrier] = useState("");
+  const [labelStreet1, setLabelStreet1] = useState("");
+  const [labelStreet2, setLabelStreet2] = useState("");
+  const [labelCity, setLabelCity] = useState("");
+  const [labelState, setLabelState] = useState("");
+  const [labelPostalCode, setLabelPostalCode] = useState("");
+  const [buyingLabelId, setBuyingLabelId] = useState<number | null>(null);
+  const [labelError, setLabelError] = useState<string | null>(null);
+  const [labelQuote, setLabelQuote] = useState<LabelQuote | null>(null);
+  const [labelQuoteLoading, setLabelQuoteLoading] = useState(false);
+  const [labelQuoteError, setLabelQuoteError] = useState<string | null>(null);
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -152,6 +177,101 @@ export function PendingTab() {
     }
   }
 
+  async function openLabelPanel(orderId: number) {
+    setLabelError(null);
+    setLabelPanelOrderId(orderId);
+    setLabelPreview(null);
+    setLabelPreviewLoading(true);
+    try {
+      const preview = await fetchLabelPreview(orderId);
+      setLabelPreview(preview);
+      setLabelCarrier(preview.carrier && preview.availableCarriers.includes(preview.carrier) ? preview.carrier : preview.availableCarriers[0] ?? "");
+      setLabelStreet1(preview.street1);
+      setLabelStreet2(preview.street2 ?? "");
+      setLabelCity(preview.city);
+      setLabelState(preview.state);
+      setLabelPostalCode(preview.postalCode);
+    } catch (err) {
+      setLabelError(err instanceof Error ? err.message : "Failed to load address preview.");
+    } finally {
+      setLabelPreviewLoading(false);
+    }
+  }
+
+  function closeLabelPanel() {
+    setLabelPanelOrderId(null);
+    setLabelPreview(null);
+    setLabelError(null);
+    setLabelQuote(null);
+    setLabelQuoteError(null);
+  }
+
+  // Re-quotes whenever the reviewed carrier or address changes — debounced
+  // so typing in an address field doesn't fire a request per keystroke.
+  // This is what makes "Confirm purchase" show a real, current price
+  // instead of confirming blind; quotes cost nothing and have no side
+  // effects (see fetchLabelQuote), so re-fetching freely here is safe.
+  useEffect(() => {
+    // Invalidated immediately (not just on the debounce firing) so
+    // "Confirm purchase" can never stay enabled showing a price that no
+    // longer matches the currently-typed fields, even during the 500ms
+    // debounce window.
+    setLabelQuote(null);
+    if (!labelPanelOrderId || !labelCarrier || !labelStreet1.trim() || !labelCity.trim() || !labelState.trim() || !labelPostalCode.trim()) {
+      return;
+    }
+    const orderId = labelPanelOrderId;
+    const timer = setTimeout(() => {
+      setLabelQuoteError(null);
+      setLabelQuoteLoading(true);
+      fetchLabelQuote(orderId, {
+        carrier: labelCarrier,
+        address: {
+          street1: labelStreet1.trim(),
+          street2: labelStreet2.trim() || undefined,
+          city: labelCity.trim(),
+          state: labelState.trim(),
+          postalCode: labelPostalCode.trim(),
+        },
+      })
+        .then(setLabelQuote)
+        .catch((err) => {
+          setLabelQuote(null);
+          setLabelQuoteError(err instanceof Error ? err.message : "Failed to get a price quote.");
+        })
+        .finally(() => setLabelQuoteLoading(false));
+    }, 500);
+    return () => clearTimeout(timer);
+  }, [labelPanelOrderId, labelCarrier, labelStreet1, labelStreet2, labelCity, labelState, labelPostalCode]);
+
+  async function handleBuyLabel(orderId: number) {
+    if (!labelStreet1.trim() || !labelCity.trim() || !labelState.trim() || !labelPostalCode.trim()) {
+      setLabelError("Street, City, State, and Zip are all required before buying a label.");
+      return;
+    }
+    setLabelError(null);
+    setBuyingLabelId(orderId);
+    try {
+      await buyShipEngineLabel(orderId, {
+        carrier: labelCarrier || undefined,
+        address: {
+          street1: labelStreet1.trim(),
+          street2: labelStreet2.trim() || undefined,
+          city: labelCity.trim(),
+          state: labelState.trim(),
+          postalCode: labelPostalCode.trim(),
+        },
+      });
+      setOrders((prev) => prev.filter((o) => o.id !== orderId));
+      setPagination((prev) => ({ ...prev, total: Math.max(0, prev.total - 1) }));
+      closeLabelPanel();
+    } catch (err) {
+      setLabelError(err instanceof Error ? err.message : "Failed to buy label.");
+    } finally {
+      setBuyingLabelId(null);
+    }
+  }
+
   function toggleSelect(id: number) {
     setSelectedIds((prev) => {
       const next = new Set(prev);
@@ -205,6 +325,12 @@ export function PendingTab() {
     setSelectedIds(new Set());
     setBulkShipping(false);
   }
+
+  // ShipStation orders are bought one at a time with mandatory address
+  // review (see openLabelPanel/handleBuyLabel) — incompatible with an
+  // unattended bulk loop, since each purchase costs real money. Bulk
+  // selection/shipping stays EasyPost-only.
+  const isShipStation = settings?.deliveryProvider === "SHIPSTATION";
 
   return (
     <div className="mt-4 rounded-xl border border-ink-100 bg-white">
@@ -273,14 +399,16 @@ export function PendingTab() {
           <table className="w-full text-left text-sm">
             <thead>
               <tr className="border-b border-ink-100 text-xs uppercase tracking-wide text-ink-500">
-                <th className="w-10 px-5 py-3">
-                  <input
-                    type="checkbox"
-                    checked={selectedIds.size === orders.length}
-                    onChange={toggleSelectAll}
-                    className="h-4 w-4"
-                  />
-                </th>
+                {!isShipStation && (
+                  <th className="w-10 px-5 py-3">
+                    <input
+                      type="checkbox"
+                      checked={selectedIds.size === orders.length}
+                      onChange={toggleSelectAll}
+                      className="h-4 w-4"
+                    />
+                  </th>
+                )}
                 <th className="px-3 py-3 font-medium">Reference</th>
                 <th className="px-3 py-3 font-medium">Items</th>
                 {SORTABLE_COLUMNS.map((col) => (
@@ -302,11 +430,33 @@ export function PendingTab() {
             <tbody>
               {orders.map((order) => {
                 const result = bulkResults[order.id];
+                const selectedCarrier = carrierInputs[order.id] ?? CARRIER_OPTIONS[0];
+
+                // ShipStation only tracks carriers actually connected on the
+                // ShipEngine account (see store-settings-context.tsx /
+                // settings.service.ts's live GET /v1/carriers lookup) — the
+                // dropdown is narrowed to just those instead of offering
+                // every CARRIER_OPTIONS value and warning after the fact.
+                // The order's auto-assigned carrier (from CarrierRule) can
+                // still be one that isn't connected — e.g. this DE order
+                // defaulting to DHL when only USPS/UPS are connected — so
+                // it's kept in the list as a disabled option rather than
+                // silently swapped out from under the admin, making clear
+                // why it can't be picked as-is.
+                const connectedCarriers = settings?.shipEngineSupportedCarriers ?? [];
+                const carrierChoices = isShipStation
+                  ? CARRIER_OPTIONS.filter((c) => connectedCarriers.includes(c) || c === order.carrier)
+                  : CARRIER_OPTIONS;
+                const carrierUntrackable = isShipStation && !connectedCarriers.includes(selectedCarrier);
+                const panelOpen = labelPanelOrderId === order.id;
                 return (
-                  <tr key={order.id} className="border-b border-ink-100 last:border-0 hover:bg-gray-50">
-                    <td className="px-5 py-3">
-                      <input type="checkbox" checked={selectedIds.has(order.id)} onChange={() => toggleSelect(order.id)} className="h-4 w-4" />
-                    </td>
+                  <Fragment key={order.id}>
+                  <tr className="border-b border-ink-100 last:border-0 hover:bg-gray-50">
+                    {!isShipStation && (
+                      <td className="px-5 py-3">
+                        <input type="checkbox" checked={selectedIds.has(order.id)} onChange={() => toggleSelect(order.id)} className="h-4 w-4" />
+                      </td>
+                    )}
                     <td className="px-3 py-3 font-medium text-ink-900">
                       <Link
                         href={`/orders/${order.id}?readonly=1`}
@@ -325,39 +475,205 @@ export function PendingTab() {
                     <td className="px-3 py-3 text-ink-700">{order.shippingCountry ?? "—"}</td>
                     <td className="px-3 py-3">
                       <select
-                        value={carrierInputs[order.id] ?? CARRIER_OPTIONS[0]}
+                        value={selectedCarrier}
                         onChange={(e) => setCarrierInputs((prev) => ({ ...prev, [order.id]: e.target.value }))}
                         className="rounded-md border border-ink-100 px-2 py-1.5 text-sm outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
                       >
-                        {CARRIER_OPTIONS.map((c) => (
-                          <option key={c} value={c}>
+                        {carrierChoices.map((c) => (
+                          <option key={c} value={c} disabled={isShipStation && !connectedCarriers.includes(c)}>
                             {c}
+                            {isShipStation && !connectedCarriers.includes(c) ? " (not connected)" : ""}
                           </option>
                         ))}
                       </select>
-                    </td>
-                    <td className="px-3 py-3">
-                      <input
-                        type="text"
-                        placeholder="e.g. 1Z999AA10123456784"
-                        value={trackingInputs[order.id] ?? ""}
-                        onChange={(e) => setTrackingInputs((prev) => ({ ...prev, [order.id]: e.target.value }))}
-                        className="w-48 rounded-md border border-ink-100 px-2 py-1.5 text-sm outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
-                      />
-                      {result && typeof result === "object" && (
-                        <p className="mt-1 text-xs text-brand-600">{result.error}</p>
+                      {carrierUntrackable && (
+                        <p className="mt-1 max-w-[10rem] text-xs text-amber-600">
+                          Won&apos;t auto-track under ShipStation.
+                        </p>
                       )}
                     </td>
-                    <td className="px-5 py-3 text-right">
-                      <button
-                        onClick={() => handleShip(order.id)}
-                        disabled={shippingId === order.id || result === "shipping"}
-                        className="rounded-md bg-brand-500 px-3 py-1.5 text-sm font-medium text-white hover:bg-brand-600 disabled:opacity-50"
-                      >
-                        {shippingId === order.id || result === "shipping" ? "Shipping..." : "Mark shipped"}
-                      </button>
-                    </td>
+                    {isShipStation ? (
+                      <>
+                        <td className="px-3 py-3 text-ink-500">
+                          {order.labelUrl ? (
+                            <div>
+                              <p className="font-mono text-xs text-ink-900">{order.trackingNumber}</p>
+                              <a
+                                href={order.labelUrl}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="text-xs text-brand-600 hover:underline"
+                              >
+                                View label
+                              </a>
+                            </div>
+                          ) : (
+                            <span className="text-xs text-ink-400">No label yet</span>
+                          )}
+                        </td>
+                        <td className="px-5 py-3 text-right">
+                          {!order.labelUrl && (
+                            <button
+                              onClick={() => (panelOpen ? closeLabelPanel() : openLabelPanel(order.id))}
+                              className="rounded-md bg-brand-500 px-3 py-1.5 text-sm font-medium text-white hover:bg-brand-600 disabled:opacity-50"
+                            >
+                              {panelOpen ? "Cancel" : "Buy label"}
+                            </button>
+                          )}
+                        </td>
+                      </>
+                    ) : (
+                      <>
+                        <td className="px-3 py-3">
+                          <input
+                            type="text"
+                            placeholder="e.g. 1Z999AA10123456784"
+                            value={trackingInputs[order.id] ?? ""}
+                            onChange={(e) => setTrackingInputs((prev) => ({ ...prev, [order.id]: e.target.value }))}
+                            className="w-48 rounded-md border border-ink-100 px-2 py-1.5 text-sm outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
+                          />
+                          {result && typeof result === "object" && (
+                            <p className="mt-1 text-xs text-brand-600">{result.error}</p>
+                          )}
+                        </td>
+                        <td className="px-5 py-3 text-right">
+                          <button
+                            onClick={() => handleShip(order.id)}
+                            disabled={shippingId === order.id || result === "shipping"}
+                            className="rounded-md bg-brand-500 px-3 py-1.5 text-sm font-medium text-white hover:bg-brand-600 disabled:opacity-50"
+                          >
+                            {shippingId === order.id || result === "shipping" ? "Shipping..." : "Mark shipped"}
+                          </button>
+                        </td>
+                      </>
+                    )}
                   </tr>
+                  {isShipStation && panelOpen && (
+                    <tr className="border-b border-ink-100 bg-gray-50">
+                      <td colSpan={8} className="px-5 py-4">
+                        {labelPreviewLoading ? (
+                          <p className="text-sm text-ink-500">Loading address preview...</p>
+                        ) : (
+                          <div className="max-w-2xl space-y-3">
+                            <p className="text-xs font-medium uppercase tracking-wide text-ink-500">
+                              Review before buying — {order.reference}
+                            </p>
+                            <div className="grid grid-cols-2 gap-3">
+                              <div>
+                                <label className="block text-xs text-ink-500">Carrier</label>
+                                <select
+                                  value={labelCarrier}
+                                  onChange={(e) => setLabelCarrier(e.target.value)}
+                                  className="mt-1 w-full rounded-md border border-ink-100 px-2 py-1.5 text-sm outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
+                                >
+                                  {(labelPreview?.availableCarriers ?? []).map((c) => (
+                                    <option key={c} value={c}>
+                                      {c}
+                                    </option>
+                                  ))}
+                                </select>
+                              </div>
+                              <div>
+                                <label className="block text-xs text-ink-500">Street 2 (optional)</label>
+                                <input
+                                  type="text"
+                                  value={labelStreet2}
+                                  onChange={(e) => setLabelStreet2(e.target.value)}
+                                  className="mt-1 w-full rounded-md border border-ink-100 px-2 py-1.5 text-sm outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
+                                />
+                              </div>
+                              <div className="col-span-2">
+                                <label className="block text-xs text-ink-500">Street 1</label>
+                                <input
+                                  type="text"
+                                  value={labelStreet1}
+                                  onChange={(e) => setLabelStreet1(e.target.value)}
+                                  className="mt-1 w-full rounded-md border border-ink-100 px-2 py-1.5 text-sm outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
+                                />
+                              </div>
+                              <div>
+                                <label className="block text-xs text-ink-500">City</label>
+                                <input
+                                  type="text"
+                                  value={labelCity}
+                                  onChange={(e) => setLabelCity(e.target.value)}
+                                  className="mt-1 w-full rounded-md border border-ink-100 px-2 py-1.5 text-sm outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
+                                />
+                              </div>
+                              <div>
+                                <label className="block text-xs text-ink-500">State</label>
+                                <input
+                                  type="text"
+                                  value={labelState}
+                                  onChange={(e) => setLabelState(e.target.value)}
+                                  className="mt-1 w-full rounded-md border border-ink-100 px-2 py-1.5 text-sm outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
+                                />
+                              </div>
+                              <div>
+                                <label className="block text-xs text-ink-500">Zip</label>
+                                <input
+                                  type="text"
+                                  value={labelPostalCode}
+                                  onChange={(e) => setLabelPostalCode(e.target.value)}
+                                  className="mt-1 w-full rounded-md border border-ink-100 px-2 py-1.5 text-sm outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
+                                />
+                              </div>
+                            </div>
+                            {(!labelPreview?.street1 || !labelPreview?.city) && (
+                              <p className="text-xs text-amber-600">
+                                Couldn&apos;t fully auto-parse this order&apos;s address — please check the fields above
+                                before buying.
+                              </p>
+                            )}
+
+                            <div className="rounded-md border border-ink-100 bg-white px-3 py-2">
+                              {labelQuoteLoading ? (
+                                <p className="text-sm text-ink-500">Getting a price quote...</p>
+                              ) : labelQuoteError ? (
+                                <p className="text-sm text-brand-600">{labelQuoteError}</p>
+                              ) : labelQuote ? (
+                                <div className="flex items-baseline justify-between">
+                                  <span className="text-sm text-ink-700">{labelQuote.serviceName}</span>
+                                  <span className="text-sm font-semibold text-ink-900">
+                                    {formatCents(labelQuote.amountCents, labelQuote.currency)}
+                                    {labelQuote.deliveryDays != null && (
+                                      <span className="ml-2 text-xs font-normal text-ink-500">
+                                        ~{labelQuote.deliveryDays}d delivery
+                                      </span>
+                                    )}
+                                  </span>
+                                </div>
+                              ) : (
+                                <p className="text-sm text-ink-400">Fill in the address to see a price.</p>
+                              )}
+                            </div>
+
+                            {labelError && <p className="text-sm text-brand-600">{labelError}</p>}
+                            <div className="flex gap-2">
+                              <button
+                                onClick={() => handleBuyLabel(order.id)}
+                                disabled={buyingLabelId === order.id || !labelQuote || labelQuoteLoading}
+                                className="rounded-md bg-brand-500 px-4 py-2 text-sm font-medium text-white hover:bg-brand-600 disabled:opacity-50"
+                              >
+                                {buyingLabelId === order.id
+                                  ? "Buying..."
+                                  : labelQuote
+                                  ? `Confirm purchase — ${formatCents(labelQuote.amountCents, labelQuote.currency)}`
+                                  : "Confirm purchase"}
+                              </button>
+                              <button
+                                onClick={closeLabelPanel}
+                                className="rounded-md border border-ink-100 px-4 py-2 text-sm font-medium text-ink-700 hover:bg-white"
+                              >
+                                Cancel
+                              </button>
+                            </div>
+                          </div>
+                        )}
+                      </td>
+                    </tr>
+                  )}
+                  </Fragment>
                 );
               })}
             </tbody>

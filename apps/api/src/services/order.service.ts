@@ -3,7 +3,7 @@ import { prisma } from "../lib/prisma";
 import { HttpError } from "../middleware/errorHandler";
 import { canTransition } from "../lib/orderStateMachine";
 import { toXlsx } from "../lib/xlsx";
-import { priceCart, type CartLine } from "./pricing.service";
+import { priceCart, type CartLine, type ShippingAddressInput } from "./pricing.service";
 import { reserveStock, releaseStock, commitReservedStock, restockCommittedStock } from "./inventory.service";
 import { resolveStaleOrderNotifications } from "./notification.service";
 import { assignCarrier } from "./carrier.service";
@@ -227,6 +227,61 @@ export async function listHeldOrders() {
   }));
 }
 
+// Public order tracking — the storefront's "where's my order?" lookup,
+// keyed by the reference the customer got at checkout. There's no customer
+// login, so the reference IS the credential: this deliberately returns only
+// what a shipping-status page needs and NOT the customer's address, email,
+// payment method, or internal ids, so guessing a reference leaks nothing
+// materially sensitive. Reference is @unique, so this can never match the
+// wrong order.
+export async function getOrderByReference(reference: string) {
+  const order = await prisma.order.findUnique({
+    where: { reference },
+    include: {
+      items: { include: { variant: { select: { sku: true, product: { select: { title: true, slug: true } } } } } },
+      statusHistory: { orderBy: { changedAt: "asc" } },
+    },
+  });
+  if (!order) return null;
+
+  return {
+    reference: order.reference,
+    status: order.status,
+    placedAt: order.createdAt,
+    currency: order.currency,
+    subtotalCents: order.subtotalCents,
+    discountCents: order.discountCents,
+    shippingCents: order.shippingCents,
+    taxCents: order.taxCents,
+    totalCents: order.totalCents,
+    // Null until an admin ships the order — the storefront renders a
+    // "not shipped yet" state rather than an empty tracking field.
+    trackingNumber: order.trackingNumber,
+    carrier: order.carrier,
+    // Carrier-reported status (EasyPost), when the order has a live tracker.
+    deliveryStatus: order.deliveryStatus,
+    trackingUrl: order.easypostTrackingUrl,
+    paidAt: order.paidAt,
+    // There are no shippedAt/deliveredAt columns — the status history is the
+    // authoritative record of when each transition happened, so read them
+    // from there rather than adding denormalized timestamps.
+    shippedAt: order.statusHistory.find((e) => e.status === OrderStatus.SHIPPED)?.changedAt ?? null,
+    deliveredAt: order.statusHistory.find((e) => e.status === OrderStatus.DELIVERED)?.changedAt ?? null,
+    items: order.items.map((item) => ({
+      productTitle: item.variant.product.title,
+      productSlug: item.variant.product.slug,
+      sku: item.variant.sku,
+      quantity: item.quantity,
+      unitPriceCents: item.unitPriceCents,
+    })),
+    // Drives the delivery timeline on the tracking page.
+    timeline: order.statusHistory.map((entry) => ({
+      status: entry.status,
+      changedAt: entry.changedAt,
+    })),
+  };
+}
+
 export async function getOrdersForUser(userId: number) {
   return prisma.order.findMany({
     where: { userId },
@@ -272,12 +327,45 @@ function generateReference() {
   return `ORD-${random}`;
 }
 
+// Order.reference is @unique because it's the customer's tracking handle
+// (see the public /orders/track/:reference route). ~2.2bn combinations make
+// a clash unlikely, but "unlikely" plus a unique constraint means a failed
+// checkout for a real customer, so retry a fresh reference on P2002 rather
+// than surfacing the collision to them.
+async function createOrderWithUniqueReference(
+  tx: Prisma.TransactionClient,
+  data: Omit<Prisma.OrderUncheckedCreateInput, "reference">,
+  attempts = 5
+) {
+  for (let attempt = 1; attempt <= attempts; attempt++) {
+    try {
+      return await tx.order.create({
+        data: { ...data, reference: generateReference() },
+        include: { items: true },
+      });
+    } catch (err) {
+      const isReferenceCollision =
+        err instanceof Prisma.PrismaClientKnownRequestError &&
+        err.code === "P2002" &&
+        String(err.meta?.target ?? "").includes("reference");
+      if (!isReferenceCollision || attempt === attempts) throw err;
+    }
+  }
+  // Unreachable — the loop either returns or throws.
+  throw new HttpError(500, "Could not allocate an order reference");
+}
+
 export interface CheckoutInput {
   userId?: number;
   items: CartLine[];
   paymentMethod: PaymentMethod;
   shippingAddress?: string;
   shippingCountry?: string;
+  // Structured — used only to get a fully accurate shipping quote (see
+  // pricing.service.ts's priceCart, lib/shippingQuote.ts). shippingAddress
+  // above stays the free-text snapshot actually stored on the order;
+  // this is not persisted anywhere itself.
+  shippingAddressStructured?: ShippingAddressInput;
   couponCode?: string;
 }
 
@@ -294,7 +382,7 @@ export async function checkout(input: CheckoutInput) {
     );
   }
 
-  const pricing = await priceCart(input.items, input.couponCode, input.shippingCountry);
+  const pricing = await priceCart(input.items, input.couponCode, input.shippingCountry, input.shippingAddressStructured);
 
   const reservedSoFar: CartLine[] = [];
   try {
@@ -340,9 +428,7 @@ export async function checkout(input: CheckoutInput) {
         }
       }
 
-      return tx.order.create({
-        data: {
-          reference: generateReference(),
+      return createOrderWithUniqueReference(tx, {
           status: OrderStatus.PENDING,
           paymentMethod: input.paymentMethod,
           subtotalCents: pricing.subtotalCents,
@@ -364,8 +450,6 @@ export async function checkout(input: CheckoutInput) {
             })),
           },
           statusHistory: { create: { status: OrderStatus.PENDING } },
-        },
-        include: { items: true },
       });
     });
   } catch (err) {

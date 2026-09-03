@@ -252,6 +252,11 @@ model ProductVariant {
   // when the parent product is active; the admin still sees it (greyed out)
   // so it can be reactivated or its stock reviewed.
   isActive            Boolean   @default(true)
+  // Shipping weight in ounces — null falls back to a default constant at
+  // label-purchase time (see shipengine.ts's DEFAULT_WEIGHT_OZ). Ounces,
+  // not grams/kg, to match ShipEngine's packages[].weight.value +
+  // weight.unit: "ounce" shape directly with no unit conversion.
+  weight              Int?
 
   productId Int
   product   Product @relation(fields: [productId], references: [id], onDelete: Cascade)
@@ -382,6 +387,30 @@ model Order {
   easypostTrackerId   String?
   easypostTrackingUrl String?
   deliveryStatus      String?
+  // Which provider created the tracker above (or, for ShipEngine, which
+  // provider to re-query using carrier+trackingNumber directly — ShipEngine
+  // has no persistent tracker object to store an id for, see
+  // lib/shipengine.ts). Null for orders shipped before this field existed,
+  // or shipped with no tracking provider configured at all — both cases are
+  // simply excluded from the in-transit/auto-refresh flow. Set once, at ship
+  // time, from whatever StoreSettings.deliveryProvider was then — switching
+  // the provider later doesn't retroactively change how an already-shipped
+  // order gets tracked.
+  trackingProvider    String?
+
+  // Set when trackingNumber/carrier above were produced by an actual
+  // ShipEngine label purchase (see shipping.service.ts's
+  // buyShipEngineLabel) rather than typed in manually — distinguishes a
+  // real, paid label from EasyPost's manual-entry flow. labelUrl points at
+  // OUR OWN /uploads/<uuid>.pdf copy of the label (downloaded at purchase
+  // time), not ShipEngine's hosted URL, which can expire. shipEngineLabelId
+  // is kept for a possible future void/refund-label action — no such
+  // action exists yet.
+  labelPurchasedAt     DateTime?
+  labelUrl             String?
+  shipEngineLabelId    String?
+  shippingCostCents    Int?
+  shippingCostCurrency String?
 
   // Payment/idempotency — paymentAttemptCount increments on every call to
   // POST /payments/intent for this order, and the value at call time forms
@@ -780,6 +809,29 @@ model StoreSettings {
   // Used when an order's shippingCountry has no matching CarrierRule.
   defaultCarrier      String  @default("USPS")
 
+  // Which shipment-tracking provider shipping.service.ts talks to when an
+  // order is marked shipped — see lib/shipengine.ts and lib/easypost.ts.
+  // Both are wired up: EasyPost creates a tracker from a manually-entered
+  // tracking number; ShipStation (ShipEngine) can additionally purchase a
+  // real label and generate the tracking number itself — see
+  // buyShipEngineLabel.
+  deliveryProvider String @default("EASYPOST")
+
+  // The store's own shipping-origin address — required as the ship_from
+  // side of a ShipEngine label purchase (see shipengine.ts's
+  // buyShipEngineLabel), configured once in Configuration rather than
+  // per-order. All optional at the schema level so existing installs don't
+  // break, but buyShipEngineLabel validates all except shipFromStreet2 are
+  // present before calling the Labels API.
+  shipFromName    String?
+  shipFromPhone   String?
+  shipFromStreet1 String?
+  shipFromStreet2 String?
+  shipFromCity    String?
+  shipFromState   String?
+  shipFromZip     String?
+  shipFromCountry String? @default("US")
+
   // Which pair of credentials below is actually used to build the
   // Stripe/EasyPost clients — see lib/credentials.ts. SANDBOX by default so
   // a fresh install never accidentally fires a real charge/shipment before
@@ -797,9 +849,11 @@ model StoreSettings {
   stripeSecretKeyTest     String? @db.Text
   stripeWebhookSecretTest String? @db.Text
   easypostApiKeyTest      String? @db.Text
+  shipstationApiKeyTest   String? @db.Text
   stripeSecretKeyLive     String? @db.Text
   stripeWebhookSecretLive String? @db.Text
   easypostApiKeyLive      String? @db.Text
+  shipstationApiKeyLive   String? @db.Text
 
   updatedAt DateTime @updatedAt
 }

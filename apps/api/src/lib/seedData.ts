@@ -143,6 +143,13 @@ interface VariantSeed {
   priceCents: number;
   attributes: Record<string, string>;
   stockQuantity: number;
+  // Ounces — see ProductVariant.weight's schema comment. Optional: most
+  // variants fall back to shipengine.ts's DEFAULT_WEIGHT_OZ; only the SKUs
+  // actually referenced by seeded orders (see seedOrders/seedBulkOrders/
+  // seedMoreOrderExamples) are given realistic values here, so demo
+  // shipping quotes are believably differentiated by product rather than
+  // uniform.
+  weight?: number;
 }
 
 // Multiplies every VariantSeed.stockQuantity below at seed time — see the
@@ -204,9 +211,9 @@ const PRODUCTS: ProductSeed[] = [
     tags: ["bestseller", "electric"],
     imageFilenames: ["heater-nordic-electric.webp"],
     variants: [
-      { sku: "HTR-NORD-6KW", priceCents: 64900, attributes: { power: "6kW", roomSize: "70-130 ft³" }, stockQuantity: 22 },
-      { sku: "HTR-NORD-8KW", priceCents: 71900, attributes: { power: "8kW", roomSize: "130-210 ft³" }, stockQuantity: 18 },
-      { sku: "HTR-NORD-9KW", priceCents: 78900, attributes: { power: "9kW", roomSize: "180-280 ft³" }, stockQuantity: 12 },
+      { sku: "HTR-NORD-6KW", priceCents: 64900, attributes: { power: "6kW", roomSize: "70-130 ft³" }, stockQuantity: 22, weight: 288 },
+      { sku: "HTR-NORD-8KW", priceCents: 71900, attributes: { power: "8kW", roomSize: "130-210 ft³" }, stockQuantity: 18, weight: 320 },
+      { sku: "HTR-NORD-9KW", priceCents: 78900, attributes: { power: "9kW", roomSize: "180-280 ft³" }, stockQuantity: 12, weight: 352 },
     ],
   },
   {
@@ -219,8 +226,8 @@ const PRODUCTS: ProductSeed[] = [
     tags: ["new", "digital"],
     imageFilenames: ["heater-innova-digital.webp"],
     variants: [
-      { sku: "HTR-INV-8KW", priceCents: 94900, attributes: { power: "8kW", roomSize: "130-210 ft³" }, stockQuantity: 10 },
-      { sku: "HTR-INV-10KW", priceCents: 104900, attributes: { power: "10kW", roomSize: "210-310 ft³" }, stockQuantity: 7 },
+      { sku: "HTR-INV-8KW", priceCents: 94900, attributes: { power: "8kW", roomSize: "130-210 ft³" }, stockQuantity: 10, weight: 336 },
+      { sku: "HTR-INV-10KW", priceCents: 104900, attributes: { power: "10kW", roomSize: "210-310 ft³" }, stockQuantity: 7, weight: 368 },
     ],
   },
   {
@@ -232,8 +239,8 @@ const PRODUCTS: ProductSeed[] = [
     tags: ["outdoor", "wood-burning"],
     imageFilenames: ["heater-barrel-wood.webp"],
     variants: [
-      { sku: "HTR-WOOD-16", priceCents: 82900, attributes: { power: "16kW equiv", material: "Cast Iron" }, stockQuantity: 9 },
-      { sku: "HTR-WOOD-20", priceCents: 92900, attributes: { power: "20kW equiv", material: "Cast Iron" }, stockQuantity: 5 },
+      { sku: "HTR-WOOD-16", priceCents: 82900, attributes: { power: "16kW equiv", material: "Cast Iron" }, stockQuantity: 9, weight: 480 },
+      { sku: "HTR-WOOD-20", priceCents: 92900, attributes: { power: "20kW equiv", material: "Cast Iron" }, stockQuantity: 5, weight: 560 },
     ],
   },
   {
@@ -245,8 +252,8 @@ const PRODUCTS: ProductSeed[] = [
     tags: ["digital", "new"],
     imageFilenames: ["control-innova-touch.webp"],
     variants: [
-      { sku: "CTL-TOUCH-BLK", priceCents: 38900, attributes: { finish: "Black", interface: "Touchscreen" }, stockQuantity: 20 },
-      { sku: "CTL-TOUCH-WHT", priceCents: 38900, attributes: { finish: "White", interface: "Touchscreen" }, stockQuantity: 14 },
+      { sku: "CTL-TOUCH-BLK", priceCents: 38900, attributes: { finish: "Black", interface: "Touchscreen" }, stockQuantity: 20, weight: 24 },
+      { sku: "CTL-TOUCH-WHT", priceCents: 38900, attributes: { finish: "White", interface: "Touchscreen" }, stockQuantity: 14, weight: 24 },
     ],
   },
   {
@@ -257,7 +264,7 @@ const PRODUCTS: ProductSeed[] = [
     categorySlug: "control-panels",
     imageFilenames: ["control-classic-analog.webp"],
     variants: [
-      { sku: "CTL-ANLG-STD", priceCents: 14900, attributes: { finish: "Brushed Steel", interface: "Analog" }, stockQuantity: 33 },
+      { sku: "CTL-ANLG-STD", priceCents: 14900, attributes: { finish: "Brushed Steel", interface: "Analog" }, stockQuantity: 33, weight: 16 },
     ],
   },
   {
@@ -269,9 +276,9 @@ const PRODUCTS: ProductSeed[] = [
     tags: ["bestseller"],
     imageFilenames: ["bench-abachi.webp"],
     variants: [
-      { sku: "BNCH-ABACHI-5FT", priceCents: 54900, attributes: { length: "5 ft", wood: "Abachi" }, stockQuantity: 15 },
-      { sku: "BNCH-ABACHI-6FT", priceCents: 61900, attributes: { length: "6 ft", wood: "Abachi" }, stockQuantity: 11 },
-      { sku: "BNCH-ABACHI-7FT", priceCents: 68900, attributes: { length: "7 ft", wood: "Abachi" }, stockQuantity: 6 },
+      { sku: "BNCH-ABACHI-5FT", priceCents: 54900, attributes: { length: "5 ft", wood: "Abachi" }, stockQuantity: 15, weight: 400 },
+      { sku: "BNCH-ABACHI-6FT", priceCents: 61900, attributes: { length: "6 ft", wood: "Abachi" }, stockQuantity: 11, weight: 464 },
+      { sku: "BNCH-ABACHI-7FT", priceCents: 68900, attributes: { length: "7 ft", wood: "Abachi" }, stockQuantity: 6, weight: 528 },
     ],
   },
   {
@@ -282,8 +289,8 @@ const PRODUCTS: ProductSeed[] = [
     categorySlug: "benches-backrests",
     imageFilenames: ["backrest-cedar.webp"],
     variants: [
-      { sku: "BCK-CEDAR-3FT", priceCents: 18900, attributes: { length: "3 ft", wood: "Cedar" }, stockQuantity: 24 },
-      { sku: "BCK-CEDAR-4FT", priceCents: 22900, attributes: { length: "4 ft", wood: "Cedar" }, stockQuantity: 17 },
+      { sku: "BCK-CEDAR-3FT", priceCents: 18900, attributes: { length: "3 ft", wood: "Cedar" }, stockQuantity: 24, weight: 144 },
+      { sku: "BCK-CEDAR-4FT", priceCents: 22900, attributes: { length: "4 ft", wood: "Cedar" }, stockQuantity: 17, weight: 176 },
     ],
   },
   {
@@ -296,8 +303,8 @@ const PRODUCTS: ProductSeed[] = [
     tags: ["popular"],
     imageFilenames: ["door-frameless-glass.webp"],
     variants: [
-      { sku: "DOOR-GLS-CLR", priceCents: 44900, attributes: { tint: "Clear", thickness: "8mm" }, stockQuantity: 13 },
-      { sku: "DOOR-GLS-BRZ", priceCents: 46900, attributes: { tint: "Bronze", thickness: "8mm" }, stockQuantity: 9 },
+      { sku: "DOOR-GLS-CLR", priceCents: 44900, attributes: { tint: "Clear", thickness: "8mm" }, stockQuantity: 13, weight: 640 },
+      { sku: "DOOR-GLS-BRZ", priceCents: 46900, attributes: { tint: "Bronze", thickness: "8mm" }, stockQuantity: 9, weight: 640 },
     ],
   },
   {
@@ -308,7 +315,7 @@ const PRODUCTS: ProductSeed[] = [
     categorySlug: "doors-glass",
     imageFilenames: ["door-cedar-framed.webp"],
     variants: [
-      { sku: "DOOR-CDR-CLR", priceCents: 39900, attributes: { tint: "Clear", frame: "Cedar" }, stockQuantity: 8 },
+      { sku: "DOOR-CDR-CLR", priceCents: 39900, attributes: { tint: "Clear", frame: "Cedar" }, stockQuantity: 8, weight: 720 },
     ],
   },
   {
@@ -320,7 +327,7 @@ const PRODUCTS: ProductSeed[] = [
     tags: ["new"],
     imageFilenames: ["light-fiber-optic.png"],
     variants: [
-      { sku: "LGT-FIBER-150", priceCents: 32900, attributes: { strands: "150", driver: "RGB LED" }, stockQuantity: 19 },
+      { sku: "LGT-FIBER-150", priceCents: 32900, attributes: { strands: "150", driver: "RGB LED" }, stockQuantity: 19, weight: 48 },
     ],
   },
   {
@@ -332,9 +339,9 @@ const PRODUCTS: ProductSeed[] = [
     tags: ["everyday", "bestseller"],
     imageFilenames: ["bucket-cedar-ladle.webp"],
     variants: [
-      { sku: "ACC-BUCKET-CDR", priceCents: 6900, attributes: { wood: "Cedar" }, stockQuantity: 60 },
-      { sku: "ACC-BUCKET-ASP", priceCents: 6900, attributes: { wood: "Aspen" }, stockQuantity: 45 },
-      { sku: "ACC-BUCKET-HEM", priceCents: 7400, attributes: { wood: "Hemlock" }, stockQuantity: 30 },
+      { sku: "ACC-BUCKET-CDR", priceCents: 6900, attributes: { wood: "Cedar" }, stockQuantity: 60, weight: 32 },
+      { sku: "ACC-BUCKET-ASP", priceCents: 6900, attributes: { wood: "Aspen" }, stockQuantity: 45, weight: 32 },
+      { sku: "ACC-BUCKET-HEM", priceCents: 7400, attributes: { wood: "Hemlock" }, stockQuantity: 30, weight: 32 },
     ],
   },
   {
@@ -345,7 +352,7 @@ const PRODUCTS: ProductSeed[] = [
     categorySlug: "buckets-ladles",
     imageFilenames: ["bucket-steel.webp"],
     variants: [
-      { sku: "ACC-BUCKET-STL", priceCents: 8900, attributes: { finish: "Brushed Steel" }, stockQuantity: 28 },
+      { sku: "ACC-BUCKET-STL", priceCents: 8900, attributes: { finish: "Brushed Steel" }, stockQuantity: 28, weight: 40 },
     ],
   },
   {
@@ -356,7 +363,7 @@ const PRODUCTS: ProductSeed[] = [
     categorySlug: "clocks-timers",
     imageFilenames: ["thermometer-hygrometer.webp"],
     variants: [
-      { sku: "ACC-THERM-CDR", priceCents: 3900, attributes: { wood: "Cedar" }, stockQuantity: 75 },
+      { sku: "ACC-THERM-CDR", priceCents: 3900, attributes: { wood: "Cedar" }, stockQuantity: 75, weight: 8 },
     ],
   },
   {
@@ -490,6 +497,7 @@ async function seedCatalog() {
           sku: variantSeed.sku,
           priceCents: variantSeed.priceCents,
           attributes: variantSeed.attributes,
+          weight: variantSeed.weight,
           productId: product.id,
           inventory: { create: { stockQuantity: startingStock } },
         },
@@ -2152,10 +2160,25 @@ async function seedSettings() {
   // the setting on so what's demonstrated in the data matches what the
   // admin UI shows as enabled, rather than seeding a feature's example data
   // while its own toggle claims to be off.
+  // Ship-from address — required before ShipEngine will quote/purchase
+  // anything (see lib/shippingQuote.ts, lib/shipengine.ts's
+  // buyShipEngineLabel). Seeded so a fresh install can demo real shipping
+  // quotes at checkout and real label purchases in Deliveries without an
+  // admin having to configure this by hand first.
   await prisma.storeSettings.upsert({
     where: { id: 1 },
     update: {},
-    create: { id: 1, allowPartialRefunds: true },
+    create: {
+      id: 1,
+      allowPartialRefunds: true,
+      shipFromName: "Sawo Shop Warehouse",
+      shipFromPhone: "+15555550100",
+      shipFromStreet1: "4301 Bull Creek Rd",
+      shipFromCity: "Austin",
+      shipFromState: "TX",
+      shipFromZip: "78731",
+      shipFromCountry: "US",
+    },
   });
 }
 

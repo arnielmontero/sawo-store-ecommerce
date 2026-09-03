@@ -27,6 +27,10 @@ const envSchema = z.object({
   // unset in dev leaves tracking creation a no-op (see shipping.service.ts)
   // rather than crashing the whole server over a nice-to-have integration.
   EASYPOST_API_KEY: z.string().optional(),
+  // Same optional/no-op-if-unset treatment as EASYPOST_API_KEY above, for
+  // whichever delivery provider StoreSettings.deliveryProvider selects — see
+  // lib/shipengine.ts and shipping.service.ts.
+  SHIPSTATION_API_KEY: z.string().optional(),
   // Outgoing mail (order receipts, invoices). Optional for the same reason
   // as Stripe/EasyPost above — an unconfigured mailer leaves sending a
   // clearly-reported no-op (see lib/mailer.ts) rather than blocking the

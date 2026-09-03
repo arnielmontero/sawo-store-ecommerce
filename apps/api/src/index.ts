@@ -18,6 +18,7 @@ import { settingsRouter } from "./routes/settings.routes";
 import { notificationsRouter } from "./routes/notifications.routes";
 import { questionsRouter, reviewsRouter } from "./routes/reviews.routes";
 import { couponsRouter } from "./routes/coupons.routes";
+import { shippingQuoteRouter } from "./routes/shippingQuote.routes";
 import { staffRouter } from "./routes/staff.routes";
 import { taxRulesRouter } from "./routes/taxRules.routes";
 import { errorHandler, notFoundHandler } from "./middleware/errorHandler";
@@ -61,6 +62,7 @@ app.use("/api/v1/notifications", notificationsRouter);
 app.use("/api/v1/reviews", reviewsRouter);
 app.use("/api/v1/questions", questionsRouter);
 app.use("/api/v1/coupons", couponsRouter);
+app.use("/api/v1/shipping-quote", shippingQuoteRouter);
 app.use("/api/v1/staff", staffRouter);
 app.use("/api/v1/tax-rules", taxRulesRouter);
 

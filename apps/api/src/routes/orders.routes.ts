@@ -38,6 +38,17 @@ const checkoutSchema = z.object({
   paymentMethod: z.nativeEnum(PaymentMethod),
   shippingAddress: z.string().optional(),
   shippingCountry: z.string().length(2).toUpperCase().optional(),
+  // Structured — used only to get a fully accurate shipping quote (see
+  // pricing.service.ts's priceCart). shippingAddress above is still what's
+  // stored on the order as the free-text snapshot.
+  shippingAddressStructured: z
+    .object({
+      street1: z.string().min(1),
+      city: z.string().min(1),
+      state: z.string().min(1),
+      postalCode: z.string().min(1),
+    })
+    .optional(),
   couponCode: z.string().min(1).max(30).optional(),
 });
 

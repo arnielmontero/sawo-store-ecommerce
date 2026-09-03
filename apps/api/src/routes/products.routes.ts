@@ -283,6 +283,7 @@ const updateProductSchema = z.object({
         priceCents: z.number().int().positive(),
         attributes: z.record(z.unknown()).optional(),
         imageUrl: z.string().url().nullable().optional(),
+        weight: z.number().int().nonnegative().nullable().optional(),
         compareAtPriceCents: z.number().int().positive().nullable().optional(),
         saleStartsAt: z.string().datetime().nullable().optional(),
         saleEndsAt: z.string().datetime().nullable().optional(),

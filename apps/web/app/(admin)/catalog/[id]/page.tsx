@@ -70,6 +70,7 @@ export default function ProductDetailPage() {
   >({});
   const [variantSaleSavingId, setVariantSaleSavingId] = useState<number | null>(null);
   const [variantImageDrafts, setVariantImageDrafts] = useState<Record<number, string>>({});
+  const [variantWeightDrafts, setVariantWeightDrafts] = useState<Record<number, string>>({});
   const [variantSearch, setVariantSearch] = useState("");
 
   const productId = Number(params.id);
@@ -273,6 +274,36 @@ export default function ProductDetailPage() {
       });
     } catch (err) {
       setSaveError(err instanceof Error ? err.message : "Failed to update variant image.");
+    }
+  }
+
+  async function handleVariantWeightSave(variantId: number) {
+    const raw = variantWeightDrafts[variantId]?.trim();
+    const weight = raw ? Number(raw) : null;
+    if (raw && (isNaN(weight!) || weight! < 0)) {
+      setSaveError("Enter a valid weight in ounces.");
+      return;
+    }
+    setSaveError(null);
+    try {
+      const updated = await updateProduct(productId, {
+        variants: [
+          {
+            id: variantId,
+            sku: product!.variants.find((v) => v.id === variantId)!.sku,
+            priceCents: product!.variants.find((v) => v.id === variantId)!.priceCents,
+            weight,
+          },
+        ],
+      });
+      setProduct(updated);
+      setVariantWeightDrafts((prev) => {
+        const next = { ...prev };
+        delete next[variantId];
+        return next;
+      });
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : "Failed to update variant weight.");
     }
   }
 
@@ -541,6 +572,7 @@ export default function ProductDetailPage() {
                 <th className="px-3 py-3 font-medium">Attributes</th>
                 <th className="px-3 py-3 font-medium">Price</th>
                 <th className="px-3 py-3 font-medium">Image URL</th>
+                <th className="px-3 py-3 font-medium">Weight (oz)</th>
                 <th className="px-3 py-3 font-medium">Reserved</th>
                 <th className="px-3 py-3 font-medium">Stock</th>
                 <th className="px-3 py-3 font-medium">Visible</th>
@@ -585,6 +617,21 @@ export default function ProductDetailPage() {
                         if (variantImageDrafts[variant.id] !== undefined) handleVariantImageSave(variant.id);
                       }}
                       className="w-40 rounded-md border border-ink-100 px-2 py-1.5 text-xs outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
+                    />
+                  </td>
+                  <td className="px-3 py-3">
+                    <input
+                      type="number"
+                      min="0"
+                      placeholder="Falls back to 16 oz"
+                      value={variantWeightDrafts[variant.id] ?? (variant.weight ?? "")}
+                      onChange={(e) =>
+                        setVariantWeightDrafts((prev) => ({ ...prev, [variant.id]: e.target.value }))
+                      }
+                      onBlur={() => {
+                        if (variantWeightDrafts[variant.id] !== undefined) handleVariantWeightSave(variant.id);
+                      }}
+                      className="w-24 rounded-md border border-ink-100 px-2 py-1.5 text-xs outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
                     />
                   </td>
                   <td className="px-3 py-3 text-ink-700">{variant.inventory?.reservedQuantity ?? 0}</td>

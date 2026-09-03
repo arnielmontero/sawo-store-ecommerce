@@ -2,6 +2,7 @@ import { CouponType } from "@prisma/client";
 import { prisma } from "../lib/prisma";
 import { HttpError } from "../middleware/errorHandler";
 import { getTaxRateForCountry } from "./taxRule.service";
+import { getShippingQuote } from "../lib/shippingQuote";
 
 export interface CartLine {
   variantId: number;
@@ -24,9 +25,21 @@ export interface PricingResult {
   subtotalCents: number;
   discountCents: number;
   shippingCents: number;
+  // Both null/false when shipping is $0 for any reason (no country known,
+  // FREE_SHIPPING coupon, ShipStation not active, or a quote fallback —
+  // see lib/shippingQuote.ts) — not just when a real quote succeeded.
+  shippingServiceName: string | null;
+  isShippingEstimate: boolean;
   taxCents: number;
   totalCents: number;
   appliedCoupon: AppliedCoupon | null;
+}
+
+export interface ShippingAddressInput {
+  street1: string;
+  city: string;
+  state: string;
+  postalCode: string;
 }
 
 // Looks up and validates a coupon code, throwing a clear 4xx for any reason
@@ -66,11 +79,17 @@ async function resolveCoupon(code: string) {
 // shippingCountry drives the tax rate (see taxRule.service.ts) the same way
 // it already drives carrier assignment and payment-method restrictions —
 // one more thing keyed off the same field rather than a separate "tax
-// country" concept.
+// country" concept. It also now drives a real shipping-cost quote (see
+// lib/shippingQuote.ts) — shippingAddress, when passed, gets the fully
+// accurate quote for that exact address; when omitted (shippingCountry
+// known but no full address yet), a representative-city estimate is used
+// instead. When shippingCountry itself is omitted, shipping stays $0,
+// exactly as before this was wired up.
 export async function priceCart(
   lines: CartLine[],
   couponCode?: string,
-  shippingCountry?: string | null
+  shippingCountry?: string | null,
+  shippingAddress?: ShippingAddressInput
 ): Promise<PricingResult> {
   if (lines.length === 0) throw new HttpError(400, "Cart must contain at least one item");
 
@@ -91,10 +110,15 @@ export async function priceCart(
 
   const subtotalCents = pricedLines.reduce((sum, line) => sum + line.lineTotalCents, 0);
 
-  // Shipping-rate calculation is out of scope for now — no carrier-rate
-  // source exists yet. Stubbed at 0 so the pipeline's shape is correct
-  // end-to-end and can be filled in independently later.
   let shippingCents = 0;
+  let shippingServiceName: string | null = null;
+  let isShippingEstimate = false;
+  if (shippingCountry) {
+    const quote = await getShippingQuote({ items: lines, shippingCountry, address: shippingAddress });
+    shippingCents = quote.shippingCents;
+    shippingServiceName = quote.serviceName;
+    isShippingEstimate = quote.isEstimate;
+  }
 
   let discountCents = 0;
   let appliedCoupon: AppliedCoupon | null = null;
@@ -110,6 +134,8 @@ export async function priceCart(
       discountCents = Math.min(coupon.value ?? 0, subtotalCents);
     } else if (coupon.type === CouponType.FREE_SHIPPING) {
       shippingCents = 0;
+      shippingServiceName = null;
+      isShippingEstimate = false;
     }
 
     appliedCoupon = { id: coupon.id, code: coupon.code, type: coupon.type };
@@ -128,6 +154,8 @@ export async function priceCart(
     subtotalCents,
     discountCents,
     shippingCents,
+    shippingServiceName,
+    isShippingEstimate,
     taxCents,
     totalCents: subtotalCents - discountCents + shippingCents + taxCents,
     appliedCoupon,

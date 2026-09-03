@@ -27,13 +27,29 @@ export function StoreSettingsProvider({ children }: { children: ReactNode }) {
           logoUrl: null,
           allowPartialRefunds: false,
           defaultCarrier: "USPS",
+          deliveryProvider: "EASYPOST",
+          shipFromName: null,
+          shipFromPhone: null,
+          shipFromStreet1: null,
+          shipFromStreet2: null,
+          shipFromCity: null,
+          shipFromState: null,
+          shipFromZip: null,
+          shipFromCountry: null,
           apiEnvironment: "SANDBOX",
           stripeSecretKeyTestSet: false,
           stripeWebhookSecretTestSet: false,
           easypostApiKeyTestSet: false,
+          shipstationApiKeyTestSet: false,
           stripeSecretKeyLiveSet: false,
           stripeWebhookSecretLiveSet: false,
           easypostApiKeyLiveSet: false,
+          shipstationApiKeyLiveSet: false,
+          // Real value is fetched live per-account from ShipEngine (see
+          // settings.service.ts) — this only applies if that fetch itself
+          // failed, so it defaults to "none known" rather than optimistically
+          // claiming carriers are connected when we can't actually confirm it.
+          shipEngineSupportedCarriers: [],
         })
       );
   }, [user]);

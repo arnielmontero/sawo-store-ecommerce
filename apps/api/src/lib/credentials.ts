@@ -19,6 +19,8 @@ interface ResolvedCredentials {
   stripeSecretKey?: string;
   stripeWebhookSecret?: string;
   easypostApiKey?: string;
+  shipstationApiKey?: string;
+  deliveryProvider: string;
 }
 
 let cached: ResolvedCredentials | null = null;
@@ -31,19 +33,25 @@ async function getCredentials(): Promise<ResolvedCredentials> {
   const settings = await prisma.storeSettings.findUnique({ where: { id: 1 } });
   const environment = settings?.apiEnvironment ?? "SANDBOX";
 
+  const deliveryProvider = settings?.deliveryProvider ?? "EASYPOST";
+
   cached =
     environment === "PRODUCTION"
       ? {
           environment,
+          deliveryProvider,
           stripeSecretKey: settings?.stripeSecretKeyLive || undefined,
           stripeWebhookSecret: settings?.stripeWebhookSecretLive || undefined,
           easypostApiKey: settings?.easypostApiKeyLive || undefined,
+          shipstationApiKey: settings?.shipstationApiKeyLive || undefined,
         }
       : {
           environment,
+          deliveryProvider,
           stripeSecretKey: settings?.stripeSecretKeyTest || env.STRIPE_SECRET_KEY,
           stripeWebhookSecret: settings?.stripeWebhookSecretTest || env.STRIPE_WEBHOOK_SECRET,
           easypostApiKey: settings?.easypostApiKeyTest || env.EASYPOST_API_KEY,
+          shipstationApiKey: settings?.shipstationApiKeyTest || env.SHIPSTATION_API_KEY,
         };
   cachedAt = Date.now();
   return cached;
@@ -67,4 +75,12 @@ export async function getStripeWebhookSecret() {
 
 export async function getEasypostApiKey() {
   return (await getCredentials()).easypostApiKey;
+}
+
+export async function getShipstationApiKey() {
+  return (await getCredentials()).shipstationApiKey;
+}
+
+export async function getDeliveryProvider() {
+  return (await getCredentials()).deliveryProvider;
 }
