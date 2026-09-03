@@ -25,10 +25,10 @@ export default function CartPage() {
   }
 
   return (
-    <div className="mx-auto max-w-5xl px-4 py-10 sm:px-6 lg:px-8">
+    <div className="mx-auto max-w-[1400px] px-4 py-10 sm:px-6 lg:px-10">
       <h1 className="mb-8 font-serif text-3xl font-semibold text-ink-900">Your Cart</h1>
 
-      <div className="grid grid-cols-1 gap-10 lg:grid-cols-[1fr_320px]">
+      <div className="grid grid-cols-1 gap-10 lg:grid-cols-[1fr_380px]">
         <ul className="flex flex-col gap-6">
           {items.map((item) => (
             <li key={item.variantId} className="flex gap-4 rounded-2xl bg-white p-4 shadow-card">

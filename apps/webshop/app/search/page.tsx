@@ -6,7 +6,7 @@ export default async function SearchPage({ searchParams }: { searchParams: { q?:
   const products = query ? await fetchAllProducts({ search: query }) : null;
 
   return (
-    <div className="mx-auto max-w-7xl px-4 py-10 sm:px-6 lg:px-8">
+    <div className="mx-auto max-w-[1800px] px-4 py-10 sm:px-6 lg:px-10">
       <h1 className="font-serif text-3xl font-semibold text-ink-900">
         {query ? `Results for "${query}"` : "Search"}
       </h1>

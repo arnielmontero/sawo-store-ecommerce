@@ -64,6 +64,27 @@ export interface VariantDetail {
   availableStock: number;
 }
 
+// Author names arrive already masked by the API (the underlying admin row
+// stores the customer's email) — the storefront just renders what it's given.
+export interface ProductReview {
+  id: number;
+  authorName: string;
+  rating: number;
+  body: string;
+  createdAt: string;
+}
+
+// Only questions staff have actually answered are returned publicly.
+export interface ProductQA {
+  id: number;
+  authorName: string;
+  question: string;
+  answer: string | null;
+  answeredByName: string | null;
+  answeredAt: string | null;
+  createdAt: string;
+}
+
 export interface ProductDetail {
   id: number;
   title: string;
@@ -76,6 +97,8 @@ export interface ProductDetail {
   category: { id: number; name: string; slug: string } | null;
   images: ProductImage[];
   variants: VariantDetail[];
+  reviews: ProductReview[];
+  questions: ProductQA[];
   rating: number | null;
   reviewCount: number;
   isBestSeller: boolean;
@@ -111,8 +134,18 @@ async function apiFetch(path: string, init?: RequestInit) {
 export interface CouponPreview {
   discountCents: number;
   shippingCents: number;
+  shippingServiceName: string | null;
+  isShippingEstimate: boolean;
+  taxCents: number;
   totalCents: number;
   appliedCoupon: { id: number; code: string; type: "PERCENTAGE" | "FIXED_AMOUNT" | "FREE_SHIPPING" } | null;
+}
+
+export interface ShippingAddressInput {
+  street1: string;
+  city: string;
+  state: string;
+  postalCode: string;
 }
 
 // The one exception to this file's "read-only" scope above: this doesn't
@@ -124,12 +157,14 @@ export interface CouponPreview {
 // query string, not because it mutates anything server-side.
 export async function validateCoupon(
   code: string,
-  items: { variantId: number; quantity: number }[]
+  items: { variantId: number; quantity: number }[],
+  shippingCountry?: string,
+  address?: ShippingAddressInput
 ): Promise<CouponPreview> {
   const res = await fetch(`${API_URL}/api/v1/coupons/validate`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ code, items }),
+    body: JSON.stringify({ code, items, shippingCountry, address }),
     cache: "no-store",
   });
   const data = await res.json().catch(() => ({}));
@@ -137,6 +172,119 @@ export async function validateCoupon(
     throw new ApiError(res.status, data.error ?? `Request failed (${res.status})`);
   }
   return data;
+}
+
+// Real shipping cost preview — no coupon required, no order created. See
+// shippingQuote.routes.ts. Never throws for a "no quote available"
+// situation (falls back to $0 shipping server-side); only throws on a
+// genuine request failure (network, malformed input).
+export interface ShippingQuote {
+  shippingCents: number;
+  serviceName: string | null;
+  isEstimate: boolean;
+  // True when the store is in Sandbox mode — lets checkout show a small
+  // "test mode" note near the address fields so a tester never mistakes a
+  // sandbox quote for a real production charge.
+  isSandbox: boolean;
+}
+
+export async function fetchShippingQuote(input: {
+  items: { variantId: number; quantity: number }[];
+  shippingCountry: string;
+  address?: ShippingAddressInput;
+}): Promise<ShippingQuote> {
+  const res = await fetch(`${API_URL}/api/v1/shipping-quote`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+    cache: "no-store",
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new ApiError(res.status, data.error ?? `Request failed (${res.status})`);
+  }
+  return data;
+}
+
+// ── Checkout & order tracking ──────────────────────────────────────────
+//
+// The other exception to this file's read-only scope: checkout genuinely
+// creates an Order. The API re-prices every line server-side and reserves
+// stock itself (order.service.ts's checkout), so nothing the browser sends
+// about prices is trusted — the cart only supplies variant ids and
+// quantities.
+
+// Matches the API's PaymentMethod enum exactly (prisma/schema.prisma).
+export type PaymentMethod = "CARD" | "PAYPAL" | "BANK" | "PAY_WITH_CHECK";
+
+export interface PlacedOrder {
+  id: number;
+  reference: string;
+  status: string;
+  totalCents: number;
+  currency: string;
+}
+
+export async function placeOrder(input: {
+  items: { variantId: number; quantity: number }[];
+  paymentMethod: PaymentMethod;
+  shippingAddress: string;
+  shippingCountry: string;
+  shippingAddressStructured?: ShippingAddressInput;
+  couponCode?: string;
+}): Promise<PlacedOrder> {
+  const res = await fetch(`${API_URL}/api/orders/checkout`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+    cache: "no-store",
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new ApiError(res.status, data.error ?? `Checkout failed (${res.status})`);
+  }
+  return data.order;
+}
+
+export interface TrackedOrder {
+  reference: string;
+  status: string;
+  placedAt: string;
+  currency: string;
+  subtotalCents: number;
+  discountCents: number;
+  shippingCents: number;
+  taxCents: number;
+  totalCents: number;
+  trackingNumber: string | null;
+  carrier: string | null;
+  deliveryStatus: string | null;
+  trackingUrl: string | null;
+  paidAt: string | null;
+  shippedAt: string | null;
+  deliveredAt: string | null;
+  items: {
+    productTitle: string;
+    productSlug: string;
+    sku: string;
+    quantity: number;
+    unitPriceCents: number;
+  }[];
+  timeline: { status: string; changedAt: string }[];
+}
+
+// Returns null (rather than throwing) for an unknown reference so the
+// tracking page can show "we couldn't find that order" instead of an error.
+export async function trackOrder(reference: string): Promise<TrackedOrder | null> {
+  const res = await fetch(`${API_URL}/api/orders/track/${encodeURIComponent(reference)}`, {
+    cache: "no-store",
+  });
+  if (res.status === 404) return null;
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new ApiError(res.status, data.error ?? `Lookup failed (${res.status})`);
+  }
+  return data.order;
 }
 
 export async function fetchCategoryTree(): Promise<Category[]> {

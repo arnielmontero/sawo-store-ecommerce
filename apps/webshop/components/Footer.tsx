@@ -3,7 +3,7 @@ import Link from "next/link";
 export function Footer() {
   return (
     <footer className="mt-20 border-t border-ink-100 bg-white">
-      <div className="mx-auto grid max-w-7xl grid-cols-1 gap-8 px-4 py-12 sm:grid-cols-3 sm:px-6 lg:px-8">
+      <div className="mx-auto grid max-w-[1800px] grid-cols-1 gap-8 px-4 py-12 sm:grid-cols-3 sm:px-6 lg:px-10">
         <div>
           <span className="font-serif text-xl font-semibold text-ink-900">
             SAWO<span className="text-cedar-600">.</span>
@@ -19,6 +19,7 @@ export function Footer() {
             <li><Link href="/shop" className="hover:text-cedar-600">All Products</Link></li>
             <li><Link href="/search" className="hover:text-cedar-600">Search</Link></li>
             <li><Link href="/cart" className="hover:text-cedar-600">Cart</Link></li>
+            <li><Link href="/track" className="hover:text-cedar-600">Track Order</Link></li>
           </ul>
         </div>
 

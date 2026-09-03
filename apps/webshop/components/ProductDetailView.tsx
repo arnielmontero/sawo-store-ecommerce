@@ -6,13 +6,16 @@ import type { ProductDetail } from "@/lib/api";
 import { formatCents } from "@/lib/format";
 import { useCart } from "@/context/CartContext";
 import { ProductImagePlaceholder } from "./ProductImagePlaceholder";
+import { Breadcrumbs, type Crumb } from "./Breadcrumbs";
+import { StarRating } from "./StarRating";
+import { ProductReviews } from "./ProductReviews";
 
 function variantLabel(attributes: Record<string, string> | null): string {
   if (!attributes) return "";
   return Object.values(attributes).join(" / ");
 }
 
-export function ProductDetailView({ product }: { product: ProductDetail }) {
+export function ProductDetailView({ product, breadcrumbs }: { product: ProductDetail; breadcrumbs: Crumb[] }) {
   const { addItem, openCart } = useCart();
   const [selectedVariantId, setSelectedVariantId] = useState(product.variants[0]?.id);
   const [activeImageIndex, setActiveImageIndex] = useState(0);
@@ -47,12 +50,23 @@ export function ProductDetailView({ product }: { product: ProductDetail }) {
   }
 
   return (
-    <div className="mx-auto max-w-7xl px-4 py-10 sm:px-6 lg:px-8">
-      <div className="grid grid-cols-1 gap-10 lg:grid-cols-2">
+    <div className="mx-auto max-w-[1280px] px-4 py-10 sm:px-6 lg:px-10">
+      <Breadcrumbs items={breadcrumbs} />
+      {/* Gallery is deliberately narrower than the info column — a 50/50
+          split on a wide container renders the product photo at ~800px,
+          far larger than any real retail PDP shows it. */}
+      <div className="grid grid-cols-1 gap-10 lg:grid-cols-[minmax(0,460px)_1fr]">
         <div>
           <div className="relative aspect-square overflow-hidden rounded-2xl bg-cream-200">
             {activeImage ? (
-              <Image src={activeImage} alt={product.title} fill className="object-contain p-8" priority />
+              <Image
+                src={activeImage}
+                alt={product.title}
+                fill
+                sizes="(min-width: 1024px) 460px, 100vw"
+                className="object-contain p-6"
+                priority
+              />
             ) : (
               <ProductImagePlaceholder label={product.category?.name} />
             )}
@@ -85,6 +99,10 @@ export function ProductDetailView({ product }: { product: ProductDetail }) {
             <span className="text-sm font-medium uppercase tracking-wide text-cedar-600">{product.category.name}</span>
           )}
           <h1 className="mt-2 font-serif text-3xl font-semibold text-ink-900">{product.title}</h1>
+
+          <div className="mt-2">
+            <StarRating rating={product.rating} reviewCount={product.reviewCount} size="md" />
+          </div>
 
           <div className="mt-4 flex items-baseline gap-3">
             <span className="text-2xl font-semibold text-ink-900">{formatCents(priceCents, product.currency)}</span>
@@ -157,6 +175,15 @@ export function ProductDetailView({ product }: { product: ProductDetail }) {
             <p className="mt-4 text-xs text-ink-300">SKU: {selectedVariant.sku}</p>
           )}
         </div>
+      </div>
+
+      <div className="mt-16">
+        <ProductReviews
+          reviews={product.reviews}
+          questions={product.questions}
+          rating={product.rating}
+          reviewCount={product.reviewCount}
+        />
       </div>
     </div>
   );
