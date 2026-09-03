@@ -18,10 +18,11 @@ export function verifyAccessToken(token: string): AccessTokenPayload | null {
     const decoded = jwt.verify(token, env.JWT_ACCESS_SECRET);
     if (typeof decoded === "string") return null;
     const { userId, role } = decoded as Record<string, unknown>;
-    if (typeof userId !== "number" || (role !== AdminRole.ADMIN && role !== AdminRole.FULFILLMENT_STAFF)) {
+    const validRoles: unknown[] = Object.values(AdminRole);
+    if (typeof userId !== "number" || !validRoles.includes(role)) {
       return null;
     }
-    return { userId, role };
+    return { userId, role: role as AdminRole };
   } catch {
     return null;
   }

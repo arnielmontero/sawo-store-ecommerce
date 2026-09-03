@@ -50,7 +50,7 @@ const updateProfileSchema = z.object({
   country: z.string().max(100).nullable().optional(),
 });
 
-customersRouter.patch("/:id", requireRole(AdminRole.ADMIN), async (req, res, next) => {
+customersRouter.patch("/:id", requireRole(AdminRole.ADMIN, AdminRole.MANAGER), async (req, res, next) => {
   try {
     const id = Number(req.params.id);
     const input = updateProfileSchema.parse(req.body);
@@ -70,7 +70,7 @@ const logCartLeadSchema = z.object({
 
 customersRouter.post(
   "/:id/cart-leads",
-  requireRole(AdminRole.ADMIN, AdminRole.FULFILLMENT_STAFF),
+  requireRole(AdminRole.ADMIN, AdminRole.MANAGER, AdminRole.FULFILLMENT_STAFF),
   async (req, res, next) => {
     try {
       const userId = Number(req.params.id);
@@ -95,7 +95,7 @@ customersRouter.get("/:id/cart-leads", async (req, res, next) => {
   }
 });
 
-customersRouter.delete("/cart-leads/:leadId", requireRole(AdminRole.ADMIN), async (req, res, next) => {
+customersRouter.delete("/cart-leads/:leadId", requireRole(AdminRole.ADMIN, AdminRole.MANAGER), async (req, res, next) => {
   try {
     const leadId = Number(req.params.leadId);
     await deleteCartLead(leadId);

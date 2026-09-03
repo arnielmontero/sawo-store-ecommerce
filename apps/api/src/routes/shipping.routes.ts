@@ -12,7 +12,7 @@ import {
 
 export const shippingRouter = Router();
 
-shippingRouter.use(requireAuth, requireRole(AdminRole.ADMIN, AdminRole.FULFILLMENT_STAFF));
+shippingRouter.use(requireAuth, requireRole(AdminRole.ADMIN, AdminRole.MANAGER, AdminRole.FULFILLMENT_STAFF));
 
 // carrier/country arrive as either a single string or an array depending on
 // how many values are selected — standard Express query-parsing behavior

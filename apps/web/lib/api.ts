@@ -1,6 +1,6 @@
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
 
-export type AdminRole = "ADMIN" | "FULFILLMENT_STAFF";
+export type AdminRole = "ADMIN" | "MANAGER" | "FULFILLMENT_STAFF";
 
 export interface SessionUser {
   username: string;

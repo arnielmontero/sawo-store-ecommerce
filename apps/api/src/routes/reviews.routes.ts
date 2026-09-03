@@ -36,7 +36,7 @@ const logReviewSchema = z.object({
   body: z.string().min(1).max(4000),
 });
 
-reviewsRouter.post("/", requireRole(AdminRole.ADMIN, AdminRole.FULFILLMENT_STAFF), async (req, res, next) => {
+reviewsRouter.post("/", requireRole(AdminRole.ADMIN, AdminRole.MANAGER, AdminRole.FULFILLMENT_STAFF), async (req, res, next) => {
   try {
     const input = logReviewSchema.parse(req.body);
     const review = await logReview(input);
@@ -75,7 +75,7 @@ reviewsRouter.get("/", async (req, res, next) => {
   }
 });
 
-reviewsRouter.delete("/:id", requireRole(AdminRole.ADMIN), async (req, res, next) => {
+reviewsRouter.delete("/:id", requireRole(AdminRole.ADMIN, AdminRole.MANAGER), async (req, res, next) => {
   try {
     const id = Number(req.params.id);
     await deleteReview(id);
@@ -98,7 +98,7 @@ const logQuestionSchema = z.object({
   question: z.string().min(1).max(2000),
 });
 
-questionsRouter.post("/", requireRole(AdminRole.ADMIN, AdminRole.FULFILLMENT_STAFF), async (req, res, next) => {
+questionsRouter.post("/", requireRole(AdminRole.ADMIN, AdminRole.MANAGER, AdminRole.FULFILLMENT_STAFF), async (req, res, next) => {
   try {
     const input = logQuestionSchema.parse(req.body);
     const question = await logQuestion(input);
@@ -126,7 +126,7 @@ questionsRouter.get("/", async (req, res, next) => {
 
 const answerQuestionSchema = z.object({ answer: z.string().min(1).max(4000) });
 
-questionsRouter.post("/:id/answer", requireRole(AdminRole.ADMIN), async (req, res, next) => {
+questionsRouter.post("/:id/answer", requireRole(AdminRole.ADMIN, AdminRole.MANAGER), async (req, res, next) => {
   try {
     const id = Number(req.params.id);
     const { answer } = answerQuestionSchema.parse(req.body);

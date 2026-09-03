@@ -22,7 +22,7 @@ const upsertSchema = z.object({
   carrier: z.string().min(1).max(40),
 });
 
-carrierRulesRouter.post("/", requireRole(AdminRole.ADMIN), async (req, res, next) => {
+carrierRulesRouter.post("/", requireRole(AdminRole.ADMIN, AdminRole.MANAGER), async (req, res, next) => {
   try {
     const { country, carrier } = upsertSchema.parse(req.body);
     const rule = await upsertCarrierRule(country, carrier);
@@ -32,7 +32,7 @@ carrierRulesRouter.post("/", requireRole(AdminRole.ADMIN), async (req, res, next
   }
 });
 
-carrierRulesRouter.delete("/:id", requireRole(AdminRole.ADMIN), async (req, res, next) => {
+carrierRulesRouter.delete("/:id", requireRole(AdminRole.ADMIN, AdminRole.MANAGER), async (req, res, next) => {
   try {
     const id = Number(req.params.id);
     await deleteCarrierRule(id);

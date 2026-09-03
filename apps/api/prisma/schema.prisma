@@ -11,6 +11,14 @@ datasource db {
 
 enum AdminRole {
   ADMIN
+  // Day-to-day store operations — catalog, inventory, coupons, customers,
+  // reviews/Q&A, refunds, carrier/payment rules. Everything ADMIN can do
+  // EXCEPT the three most sensitive areas: Staff accounts (see
+  // staff.routes.ts), Configuration/API credentials (settings.routes.ts),
+  // and Tax rules (taxRules.routes.ts) — those stay ADMIN-only so a Manager
+  // can run the store but can't touch who has access, external API keys, or
+  // the store's tax liability.
+  MANAGER
   FULFILLMENT_STAFF
 }
 

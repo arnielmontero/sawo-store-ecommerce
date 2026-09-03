@@ -5,6 +5,13 @@ import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import { useStoreSettings } from "@/lib/store-settings-context";
 import { useAuth } from "@/lib/auth-context";
+import type { AdminRole } from "@/lib/api";
+
+const ROLE_LABELS: Record<AdminRole, string> = {
+  ADMIN: "Admin",
+  MANAGER: "Manager",
+  FULFILLMENT_STAFF: "Staff",
+};
 
 interface NavItem {
   href: string;
@@ -113,7 +120,7 @@ export function Sidebar() {
         <div className="min-w-0">
           <p className="truncate text-sm font-semibold text-ink-900">{storeName}</p>
           <p className="truncate text-xs text-ink-500">
-            {user?.name ?? "..."} ({user?.role === "ADMIN" ? "Admin" : "Staff"})
+            {user?.name ?? "..."} ({ROLE_LABELS[user?.role ?? "FULFILLMENT_STAFF"]})
           </p>
         </div>
       </div>
@@ -146,9 +153,11 @@ export function Sidebar() {
           );
         })}
 
-        <div className="pt-1">
-          <NavLink item={{ href: "/configuration", label: "Configuration", icon: ConfigIcon }} active={isActive(pathname, "/configuration")} />
-        </div>
+        {user?.role === "ADMIN" && (
+          <div className="pt-1">
+            <NavLink item={{ href: "/configuration", label: "Configuration", icon: ConfigIcon }} active={isActive(pathname, "/configuration")} />
+          </div>
+        )}
       </nav>
     </aside>
   );

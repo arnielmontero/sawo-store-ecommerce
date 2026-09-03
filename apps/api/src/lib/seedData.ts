@@ -38,6 +38,22 @@ async function seedAdmins() {
       role: AdminRole.FULFILLMENT_STAFF,
     },
   });
+
+  // Demonstrates the middle role — day-to-day store operations (catalog,
+  // coupons, customers, reviews, refunds) without Staff/Configuration/Tax
+  // access (see the requireRole(...) calls across routes/*.ts for exactly
+  // where MANAGER is and isn't granted).
+  const managerPasswordHash = await hashPassword("manager123");
+  await prisma.adminUser.upsert({
+    where: { username: "manager" },
+    update: {},
+    create: {
+      username: "manager",
+      passwordHash: managerPasswordHash,
+      name: "Store Manager",
+      role: AdminRole.MANAGER,
+    },
+  });
 }
 
 const CUSTOMER_COUNT = 12;
@@ -2429,7 +2445,7 @@ export async function runSeed(): Promise<string> {
   const totalCustomers = customers.length + bulkCustomers.length;
   const totalOrders = ORDERS.length + 6 + BULK_ORDER_COUNT;
   return (
-    `Seeded admin user (admin / admin123), staff user (staff / staff123), ${totalCustomers} customers, ` +
+    `Seeded admin user (admin / admin123), manager user (manager / manager123), staff user (staff / staff123), ${totalCustomers} customers, ` +
     `${CATEGORIES.length} categories, ${productCount} products (${variantCount} variants), ${totalOrders} orders total ` +
     `(${BULK_ORDER_COUNT} bulk-generated over the past 12 months, 3 hand-crafted refund examples, 3 return-request ` +
     `examples covering pending/approved/rejected, and ${ORDERS.length} curated demo orders), 4 order notes, ` +

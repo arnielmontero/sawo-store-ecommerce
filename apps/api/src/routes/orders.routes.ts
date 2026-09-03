@@ -200,7 +200,7 @@ const logReturnRequestSchema = z.object({
 // move money on its own.
 ordersRouter.post(
   "/:id/return-requests",
-  requireRole(AdminRole.ADMIN, AdminRole.FULFILLMENT_STAFF),
+  requireRole(AdminRole.ADMIN, AdminRole.MANAGER, AdminRole.FULFILLMENT_STAFF),
   async (req, res, next) => {
     try {
       const orderId = Number(req.params.id);
@@ -225,7 +225,7 @@ const approveReturnRequestSchema = z.object({
 // refund endpoint.
 ordersRouter.post(
   "/return-requests/:requestId/approve",
-  requireRole(AdminRole.ADMIN),
+  requireRole(AdminRole.ADMIN, AdminRole.MANAGER),
   async (req, res, next) => {
     try {
       const requestId = Number(req.params.requestId);
@@ -244,7 +244,7 @@ const rejectReturnRequestSchema = z.object({ reviewNote: z.string().max(2000).op
 
 ordersRouter.post(
   "/return-requests/:requestId/reject",
-  requireRole(AdminRole.ADMIN),
+  requireRole(AdminRole.ADMIN, AdminRole.MANAGER),
   async (req, res, next) => {
     try {
       const requestId = Number(req.params.requestId);
@@ -267,7 +267,7 @@ const updateStatusSchema = z.object({ status: z.nativeEnum(OrderStatus) });
 // step, regardless of role.
 ordersRouter.patch(
   "/:id/status",
-  requireRole(AdminRole.ADMIN, AdminRole.FULFILLMENT_STAFF),
+  requireRole(AdminRole.ADMIN, AdminRole.MANAGER, AdminRole.FULFILLMENT_STAFF),
   async (req, res, next) => {
     try {
       const id = Number(req.params.id);

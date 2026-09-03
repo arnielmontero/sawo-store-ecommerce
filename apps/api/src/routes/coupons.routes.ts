@@ -78,7 +78,7 @@ const couponSchema = z
     { message: "value must match the coupon type's rules", path: ["value"] }
   );
 
-couponsRouter.post("/", requireRole(AdminRole.ADMIN), async (req, res, next) => {
+couponsRouter.post("/", requireRole(AdminRole.ADMIN, AdminRole.MANAGER), async (req, res, next) => {
   try {
     const input = couponSchema.parse(req.body);
     const coupon = await createCoupon(input);
@@ -97,7 +97,7 @@ const updateSchema = z.object({
   isActive: z.boolean().optional(),
 });
 
-couponsRouter.patch("/:id", requireRole(AdminRole.ADMIN), async (req, res, next) => {
+couponsRouter.patch("/:id", requireRole(AdminRole.ADMIN, AdminRole.MANAGER), async (req, res, next) => {
   try {
     const id = Number(req.params.id);
     const input = updateSchema.parse(req.body);
@@ -108,7 +108,7 @@ couponsRouter.patch("/:id", requireRole(AdminRole.ADMIN), async (req, res, next)
   }
 });
 
-couponsRouter.delete("/:id", requireRole(AdminRole.ADMIN), async (req, res, next) => {
+couponsRouter.delete("/:id", requireRole(AdminRole.ADMIN, AdminRole.MANAGER), async (req, res, next) => {
   try {
     const id = Number(req.params.id);
     await deleteCoupon(id);

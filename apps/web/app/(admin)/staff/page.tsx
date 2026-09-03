@@ -6,6 +6,7 @@ import { useAuth } from "@/lib/auth-context";
 
 const ROLE_LABELS: Record<AdminRole, string> = {
   ADMIN: "Admin",
+  MANAGER: "Manager",
   FULFILLMENT_STAFF: "Fulfillment staff",
 };
 
@@ -151,6 +152,7 @@ export default function StaffPage() {
                   className="mt-1 rounded-md border border-ink-100 px-3 py-1.5 text-sm outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
                 >
                   <option value="FULFILLMENT_STAFF">Fulfillment staff</option>
+                  <option value="MANAGER">Manager</option>
                   <option value="ADMIN">Admin</option>
                 </select>
               </div>
@@ -199,6 +201,7 @@ export default function StaffPage() {
                         className="rounded-md border border-ink-100 px-2 py-1 text-xs outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500 disabled:bg-gray-100"
                       >
                         <option value="FULFILLMENT_STAFF">{ROLE_LABELS.FULFILLMENT_STAFF}</option>
+                        <option value="MANAGER">{ROLE_LABELS.MANAGER}</option>
                         <option value="ADMIN">{ROLE_LABELS.ADMIN}</option>
                       </select>
                     </td>

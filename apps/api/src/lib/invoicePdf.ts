@@ -40,33 +40,66 @@ export function buildInvoicePdf(order: InvoiceOrder, storeName: string): Promise
     doc.moveDown(1);
 
     // ── Line items table ────────────────────────────────────────────────
-    const tableTop = doc.y;
-    const col = { item: 50, sku: 300, qty: 380, price: 430, total: 490 };
-    doc.font("Helvetica-Bold").fontSize(9).fillColor("#000000");
-    doc.text("Item", col.item, tableTop);
-    doc.text("SKU", col.sku, tableTop);
-    doc.text("Qty", col.qty, tableTop);
-    doc.text("Price", col.price, tableTop);
-    doc.text("Total", col.total, tableTop);
-    doc.moveTo(50, tableTop + 14).lineTo(545, tableTop + 14).strokeColor("#dddddd").stroke();
+    // Columns widened/spaced so real SKUs (e.g. "DOOR-CDR-CLR") fit on one
+    // line at this font size — col widths intentionally sum to fit within
+    // the 495pt content area (545 - 50 margins).
+    const col = { item: 50, sku: 250, qty: 340, price: 390, total: 460 };
+    const BOTTOM_MARGIN = 90; // leaves room for the totals block + footer below the last row
+    const ROW_HEIGHT = 18;
 
-    let y = tableTop + 20;
+    function drawTableHeader() {
+      const headerY = doc.y;
+      doc.font("Helvetica-Bold").fontSize(9).fillColor("#000000");
+      doc.text("Item", col.item, headerY);
+      doc.text("SKU", col.sku, headerY);
+      doc.text("Qty", col.qty, headerY);
+      doc.text("Price", col.price, headerY);
+      doc.text("Total", col.total, headerY);
+      doc.moveTo(50, headerY + 14).lineTo(545, headerY + 14).strokeColor("#dddddd").stroke();
+      return headerY + 20;
+    }
+
+    let y = drawTableHeader();
     doc.font("Helvetica").fontSize(9).fillColor("#333333");
     for (const item of order.items) {
-      doc.text(item.variant.product.title, col.item, y, { width: 240 });
-      doc.text(item.variant.sku, col.sku, y, { width: 70 });
+      // A long product title can still wrap onto a second line even with
+      // the widened columns — measure it and advance by whichever row is
+      // taller, so a wrapped title never overlaps the next row.
+      const titleHeight = doc.heightOfString(item.variant.product.title, { width: 190 });
+      const rowHeight = Math.max(ROW_HEIGHT, titleHeight + 4);
+
+      if (y + rowHeight > doc.page.height - BOTTOM_MARGIN) {
+        doc.addPage();
+        y = drawTableHeader();
+        doc.font("Helvetica").fontSize(9).fillColor("#333333");
+      }
+
+      doc.text(item.variant.product.title, col.item, y, { width: 190 });
+      doc.text(item.variant.sku, col.sku, y, { width: 80 });
       doc.text(String(item.quantity), col.qty, y);
       doc.text(money(item.unitPriceCents, order.currency), col.price, y);
       doc.text(money(item.unitPriceCents * item.quantity, order.currency), col.total, y);
-      y += 18;
+      y += rowHeight;
     }
     doc.moveTo(50, y).lineTo(545, y).strokeColor("#dddddd").stroke();
     y += 10;
 
+    // Totals need their own space below the table — if the last item row
+    // left too little room, start the totals block on a fresh page rather
+    // than letting it run off the bottom.
+    const TOTALS_BLOCK_HEIGHT = 100;
+    if (y + TOTALS_BLOCK_HEIGHT > doc.page.height - 50) {
+      doc.addPage();
+      y = 50;
+    }
+
     // ── Totals ───────────────────────────────────────────────────────────
+    // Label column ends where the amount column (col.total) begins, so a
+    // longer label like "Discount (SAVE10)" never collides with the number.
+    const totalsLabelX = 300;
     function totalRow(label: string, cents: number, bold = false) {
       doc.font(bold ? "Helvetica-Bold" : "Helvetica").fontSize(bold ? 11 : 9.5).fillColor("#000000");
-      doc.text(label, 380, y, { width: 90 });
+      doc.text(label, totalsLabelX, y, { width: col.total - totalsLabelX - 5 });
       doc.text(money(cents, order.currency), col.total, y);
       y += bold ? 18 : 15;
     }
@@ -75,16 +108,19 @@ export function buildInvoicePdf(order: InvoiceOrder, storeName: string): Promise
     totalRow("Shipping", order.shippingCents);
     totalRow("Tax", order.taxCents);
     y += 4;
-    doc.moveTo(380, y).lineTo(545, y).strokeColor("#000000").stroke();
+    doc.moveTo(totalsLabelX, y).lineTo(545, y).strokeColor("#000000").stroke();
     y += 8;
     totalRow("Total", order.totalCents, true);
     if (order.refundedCents > 0) totalRow("Refunded", -order.refundedCents);
 
-    doc.moveDown(3);
+    // Positioned relative to where the totals block actually ended, not a
+    // fixed page offset — on a multi-page invoice the totals land on
+    // whichever page had room, and the footer must follow them there
+    // rather than risk landing mid-content or off the bottom of the page.
     doc.fontSize(8).fillColor("#999999").text(
       "This is a system-generated receipt. Thank you for your business.",
       50,
-      doc.page.height - 80,
+      y + 24,
       { align: "center", width: 495 }
     );
 

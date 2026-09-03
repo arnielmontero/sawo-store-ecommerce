@@ -7,7 +7,7 @@ import { env } from "../lib/env";
 
 export const uploadsRouter = Router();
 
-uploadsRouter.use(requireAuth, requireRole(AdminRole.ADMIN));
+uploadsRouter.use(requireAuth, requireRole(AdminRole.ADMIN, AdminRole.MANAGER));
 
 // Accepts a single image file (field name "file"), stores it to local disk
 // (see lib/upload.ts), and returns the absolute URL to save on a
