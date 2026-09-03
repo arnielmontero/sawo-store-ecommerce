@@ -27,6 +27,7 @@ import {
 } from "@/lib/api";
 import { useStoreSettings } from "@/lib/store-settings-context";
 import { useAuth } from "@/lib/auth-context";
+import { hasPermission } from "@/lib/permissions";
 import { COUNTRIES } from "@/lib/countries";
 import { CARRIER_OPTIONS } from "@/lib/constants";
 
@@ -126,7 +127,7 @@ export default function ConfigurationPage() {
     if (settings) setStoreName(settings.storeName);
   }, [settings]);
 
-  const canEdit = user?.role === "ADMIN";
+  const canEdit = hasPermission(user, "configuration", "edit");
 
   async function handleSave() {
     setError(null);

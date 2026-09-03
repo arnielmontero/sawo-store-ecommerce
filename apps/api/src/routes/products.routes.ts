@@ -1,9 +1,8 @@
 import { Router } from "express";
 import { z } from "zod";
 import fs from "fs";
-import { requireAuth, requireRole } from "../middleware/requireAuth";
+import { requireAuth, requirePermission } from "../middleware/requireAuth";
 import { HttpError } from "../middleware/errorHandler";
-import { AdminRole } from "@prisma/client";
 import { upload, uploadSpreadsheet } from "../lib/upload";
 import { env } from "../lib/env";
 import {
@@ -120,7 +119,7 @@ adminRouter.get("/categories", async (_req, res, next) => {
 
 const categoryBodySchema = z.object({ name: z.string().min(1).max(60) });
 
-adminRouter.post("/categories", requireRole(AdminRole.ADMIN, AdminRole.MANAGER), async (req, res, next) => {
+adminRouter.post("/categories", requirePermission("catalog", "create"), async (req, res, next) => {
   try {
     const { name } = categoryBodySchema.parse(req.body);
     const category = await createCategory(name);
@@ -130,7 +129,7 @@ adminRouter.post("/categories", requireRole(AdminRole.ADMIN, AdminRole.MANAGER),
   }
 });
 
-adminRouter.patch("/categories/:id", requireRole(AdminRole.ADMIN, AdminRole.MANAGER), async (req, res, next) => {
+adminRouter.patch("/categories/:id", requirePermission("catalog", "edit"), async (req, res, next) => {
   try {
     const { name } = categoryBodySchema.parse(req.body);
     const category = await updateCategory(Number(req.params.id), name);
@@ -140,7 +139,7 @@ adminRouter.patch("/categories/:id", requireRole(AdminRole.ADMIN, AdminRole.MANA
   }
 });
 
-adminRouter.delete("/categories/:id", requireRole(AdminRole.ADMIN, AdminRole.MANAGER), async (req, res, next) => {
+adminRouter.delete("/categories/:id", requirePermission("catalog", "delete"), async (req, res, next) => {
   try {
     await deleteCategory(Number(req.params.id));
     res.status(204).send();
@@ -174,7 +173,7 @@ adminRouter.get("/export", async (_req, res, next) => {
 
 adminRouter.post(
   "/import",
-  requireRole(AdminRole.ADMIN, AdminRole.MANAGER),
+  requirePermission("catalog", "edit"),
   uploadSpreadsheet.single("file"),
   async (req, res, next) => {
     try {
@@ -193,7 +192,7 @@ adminRouter.post(
 
 const bulkIdsSchema = z.object({ productIds: z.array(z.number().int().positive()).min(1) });
 
-adminRouter.post("/bulk/activate", requireRole(AdminRole.ADMIN, AdminRole.MANAGER), async (req, res, next) => {
+adminRouter.post("/bulk/activate", requirePermission("catalog", "edit"), async (req, res, next) => {
   try {
     const { productIds } = bulkIdsSchema.parse(req.body);
     await bulkSetActive(productIds, true);
@@ -203,7 +202,7 @@ adminRouter.post("/bulk/activate", requireRole(AdminRole.ADMIN, AdminRole.MANAGE
   }
 });
 
-adminRouter.post("/bulk/deactivate", requireRole(AdminRole.ADMIN, AdminRole.MANAGER), async (req, res, next) => {
+adminRouter.post("/bulk/deactivate", requirePermission("catalog", "edit"), async (req, res, next) => {
   try {
     const { productIds } = bulkIdsSchema.parse(req.body);
     await bulkSetActive(productIds, false);
@@ -218,7 +217,7 @@ const bulkCategorySchema = z.object({
   categoryId: z.number().int().positive().nullable(),
 });
 
-adminRouter.post("/bulk/category", requireRole(AdminRole.ADMIN, AdminRole.MANAGER), async (req, res, next) => {
+adminRouter.post("/bulk/category", requirePermission("catalog", "edit"), async (req, res, next) => {
   try {
     const { productIds, categoryId } = bulkCategorySchema.parse(req.body);
     await bulkSetCategory(productIds, categoryId);
@@ -233,7 +232,7 @@ const bulkPriceSchema = z.object({
   percent: z.number().min(-95).max(1000),
 });
 
-adminRouter.post("/bulk/price", requireRole(AdminRole.ADMIN, AdminRole.MANAGER), async (req, res, next) => {
+adminRouter.post("/bulk/price", requirePermission("catalog", "edit"), async (req, res, next) => {
   try {
     const { productIds, percent } = bulkPriceSchema.parse(req.body);
     await bulkAdjustPrice(productIds, percent);
@@ -292,7 +291,7 @@ const updateProductSchema = z.object({
     .optional(),
 });
 
-adminRouter.patch("/:id", requireRole(AdminRole.ADMIN, AdminRole.MANAGER), async (req, res, next) => {
+adminRouter.patch("/:id", requirePermission("catalog", "edit"), async (req, res, next) => {
   try {
     const id = Number(req.params.id);
     const input = updateProductSchema.parse(req.body);
@@ -303,7 +302,7 @@ adminRouter.patch("/:id", requireRole(AdminRole.ADMIN, AdminRole.MANAGER), async
   }
 });
 
-adminRouter.delete("/:id", requireRole(AdminRole.ADMIN, AdminRole.MANAGER), async (req, res, next) => {
+adminRouter.delete("/:id", requirePermission("catalog", "delete"), async (req, res, next) => {
   try {
     const id = Number(req.params.id);
     const product = await deactivateProduct(id);
@@ -321,7 +320,7 @@ const variantMatrixSchema = z.object({
     .min(1),
 });
 
-adminRouter.post("/:id/variants/generate", requireRole(AdminRole.ADMIN, AdminRole.MANAGER), async (req, res, next) => {
+adminRouter.post("/:id/variants/generate", requirePermission("catalog", "edit"), async (req, res, next) => {
   try {
     const id = Number(req.params.id);
     const { options } = variantMatrixSchema.parse(req.body);
@@ -336,7 +335,7 @@ const stockSchema = z.object({ stockQuantity: z.number().int().nonnegative() });
 
 adminRouter.patch(
   "/variants/:variantId/stock",
-  requireRole(AdminRole.ADMIN, AdminRole.MANAGER, AdminRole.FULFILLMENT_STAFF),
+  requirePermission("catalog", "edit"),
   async (req, res, next) => {
     try {
       const variantId = Number(req.params.variantId);
@@ -360,7 +359,7 @@ const variantActiveSchema = z.object({ isActive: z.boolean() });
 // deactivating a whole product.
 adminRouter.patch(
   "/variants/:variantId/active",
-  requireRole(AdminRole.ADMIN, AdminRole.MANAGER),
+  requirePermission("catalog", "edit"),
   async (req, res, next) => {
     try {
       const variantId = Number(req.params.variantId);
@@ -377,7 +376,7 @@ adminRouter.patch(
 
 adminRouter.post(
   "/:id/images",
-  requireRole(AdminRole.ADMIN, AdminRole.MANAGER),
+  requirePermission("catalog", "edit"),
   upload.single("file"),
   async (req, res, next) => {
     try {
@@ -392,7 +391,7 @@ adminRouter.post(
   }
 );
 
-adminRouter.delete("/:id/images/:imageId", requireRole(AdminRole.ADMIN, AdminRole.MANAGER), async (req, res, next) => {
+adminRouter.delete("/:id/images/:imageId", requirePermission("catalog", "edit"), async (req, res, next) => {
   try {
     const id = Number(req.params.id);
     const imageId = Number(req.params.imageId);
@@ -405,7 +404,7 @@ adminRouter.delete("/:id/images/:imageId", requireRole(AdminRole.ADMIN, AdminRol
 
 adminRouter.patch(
   "/:id/images/:imageId/feature",
-  requireRole(AdminRole.ADMIN, AdminRole.MANAGER),
+  requirePermission("catalog", "edit"),
   async (req, res, next) => {
     try {
       const id = Number(req.params.id);
@@ -420,7 +419,7 @@ adminRouter.patch(
 
 const reorderSchema = z.object({ orderedImageIds: z.array(z.number().int().positive()).min(1) });
 
-adminRouter.patch("/:id/images/reorder", requireRole(AdminRole.ADMIN, AdminRole.MANAGER), async (req, res, next) => {
+adminRouter.patch("/:id/images/reorder", requirePermission("catalog", "edit"), async (req, res, next) => {
   try {
     const id = Number(req.params.id);
     const { orderedImageIds } = reorderSchema.parse(req.body);
@@ -475,7 +474,7 @@ const createProductSchema = z.object({
 });
 
 // Admin only — creates a product along with its base variants.
-productsRouter.post("/", requireAuth, requireRole(AdminRole.ADMIN, AdminRole.MANAGER), async (req, res, next) => {
+productsRouter.post("/", requireAuth, requirePermission("catalog", "create"), async (req, res, next) => {
   try {
     const input = createProductSchema.parse(req.body);
     const product = await createProduct(input);

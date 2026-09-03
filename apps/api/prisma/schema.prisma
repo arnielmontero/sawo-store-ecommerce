@@ -27,10 +27,50 @@ model AdminUser {
   username     String    @unique
   passwordHash String
   name         String
+  // No longer the authorization source of truth — see AdminUserPermission
+  // below, which is. This is kept for exactly two jobs: (a) ADMIN marks a
+  // super-admin, who bypasses the grant table entirely (so a mis-clicked
+  // checkbox can never lock every admin out of Staff management), and
+  // (b) it remembers which preset an account was last initialized from, so
+  // the Staff page can highlight the right preset button when editing.
   role         AdminRole @default(ADMIN)
   createdAt    DateTime  @default(now())
 
   refreshTokens AdminRefreshToken[]
+  permissions   AdminUserPermission[]
+}
+
+// One row per (module, action) pair in the permission catalog — e.g.
+// ("orders", "view"), ("orders", "refund"), ("configuration", "resetData").
+// Seeded once and effectively static at runtime; the admin UI's checkbox
+// grid renders directly off this table (see staff.routes.ts's catalog
+// endpoint), so adding a module/action later is a seed change rather than a
+// frontend hardcode.
+model Permission {
+  id     Int    @id @default(autoincrement())
+  module String // e.g. "orders", "catalog", "taxRules"
+  action String // "view" | "create" | "edit" | "delete", or a named action
+                // like "refund" / "adjustStock" for routes that don't map to CRUD
+
+  grants AdminUserPermission[]
+
+  @@unique([module, action])
+}
+
+// Presence of a row = granted; absence = denied. This is the authorization
+// source of truth that requirePermission() reads — AdminUser.role is only
+// consulted for the super-admin short-circuit, never as a permission tier.
+model AdminUserPermission {
+  id           Int      @id @default(autoincrement())
+  adminUserId  Int
+  permissionId Int
+  createdAt    DateTime @default(now())
+
+  adminUser  AdminUser  @relation(fields: [adminUserId], references: [id], onDelete: Cascade)
+  permission Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@unique([adminUserId, permissionId])
+  @@index([adminUserId])
 }
 
 // One row per issued refresh token, so a single session can be revoked
@@ -304,7 +344,11 @@ enum PaymentMethod {
 
 model Order {
   id            Int            @id @default(autoincrement())
-  reference     String
+  // Unique because it's the customer-facing tracking handle — /api/v1/orders
+  // /track/:reference looks an order up by this alone, so a duplicate would
+  // expose one customer's order to another. generateReference() retries on
+  // collision against this constraint.
+  reference     String         @unique
   status        OrderStatus    @default(PENDING)
   // Null until checkout completes with a chosen payment method — an order
   // exists in PENDING before payment happens (see diagram: checkout locks

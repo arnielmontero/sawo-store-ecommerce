@@ -1,9 +1,8 @@
 import { Router } from "express";
 import { z } from "zod";
-import { AdminRole } from "@prisma/client";
 import { reserveRateLimiter } from "../middleware/rateLimit";
 import { HttpError } from "../middleware/errorHandler";
-import { requireAuth, requireRole } from "../middleware/requireAuth";
+import { requireAuth, requirePermission } from "../middleware/requireAuth";
 import { prisma } from "../lib/prisma";
 import {
   adjustStockManually,
@@ -84,7 +83,7 @@ const adjustSchema = z.object({
 // page (ADMIN + FULFILLMENT_STAFF) — this is the dedicated adjustment
 // screen and always requires a stated reason, so it's held to the same bar
 // as other ADMIN-only catalog writes.
-adminRouter.patch("/:variantId/adjust", requireRole(AdminRole.ADMIN, AdminRole.MANAGER), async (req, res, next) => {
+adminRouter.patch("/:variantId/adjust", requirePermission("inventory", "adjustStock"), async (req, res, next) => {
   try {
     const variantId = Number(req.params.variantId);
     const { stockQuantity, note } = adjustSchema.parse(req.body);

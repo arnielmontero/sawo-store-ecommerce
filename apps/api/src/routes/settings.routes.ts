@@ -1,16 +1,31 @@
 import { Router, type Request, type Response, type NextFunction } from "express";
 import { z } from "zod";
-import { AdminRole, ApiEnvironment } from "@prisma/client";
-import { requireAuth, requireRole } from "../middleware/requireAuth";
+import { ApiEnvironment } from "@prisma/client";
+import { requireAuth, requirePermission } from "../middleware/requireAuth";
 import { HttpError } from "../middleware/errorHandler";
 import { upload } from "../lib/upload";
 import { env } from "../lib/env";
 import { getStoreSettings, updateStoreSettings } from "../services/settings.service";
 import { clearAllData, resetSeedData } from "../services/dataReset.service";
+import { isMailerConfigured, verifyMailer } from "../lib/mailer";
 
 export const settingsRouter = Router();
 
 settingsRouter.use(requireAuth);
+
+// Lets Configuration confirm the SMTP credentials in .env actually connect
+// without needing a real order to send a test invoice through.
+settingsRouter.get("/mail/test", requirePermission("configuration", "edit"), async (_req, res, next) => {
+  try {
+    if (!isMailerConfigured()) {
+      return res.json({ configured: false, ok: false, error: "SMTP settings aren't set in the API's .env." });
+    }
+    const result = await verifyMailer();
+    res.json({ configured: true, ...result });
+  } catch (err) {
+    next(err);
+  }
+});
 
 settingsRouter.get("/", async (_req, res, next) => {
   try {
@@ -45,7 +60,7 @@ const updateSettingsSchema = z.object({
   easypostApiKeyLive: z.string().max(500).optional(),
 });
 
-settingsRouter.patch("/", requireRole(AdminRole.ADMIN), async (req, res, next) => {
+settingsRouter.patch("/", requirePermission("configuration", "edit"), async (req, res, next) => {
   try {
     const parsedBody = updateSettingsSchema.parse(req.body);
     if (parsedBody.apiEnvironment === ApiEnvironment.PRODUCTION && parsedBody.confirmProduction !== "LIVE") {
@@ -65,7 +80,7 @@ settingsRouter.patch("/", requireRole(AdminRole.ADMIN), async (req, res, next) =
 // reuses the same disk-storage multer instance as product images.
 settingsRouter.post(
   "/logo",
-  requireRole(AdminRole.ADMIN),
+  requirePermission("configuration", "edit"),
   upload.single("file"),
   async (req, res, next) => {
     try {
@@ -80,7 +95,7 @@ settingsRouter.post(
 );
 
 // Clears the logo back to the default initial-letter fallback.
-settingsRouter.delete("/logo", requireRole(AdminRole.ADMIN), async (_req, res, next) => {
+settingsRouter.delete("/logo", requirePermission("configuration", "edit"), async (_req, res, next) => {
   try {
     const settings = await updateStoreSettings({ logoUrl: null });
     res.json({ settings });
@@ -115,7 +130,7 @@ const resetConfirmSchema = z.object({ confirm: z.literal("RESET") });
 settingsRouter.post(
   "/reset/clear",
   blockInProduction,
-  requireRole(AdminRole.ADMIN),
+  requirePermission("configuration", "resetData"),
   async (req, res, next) => {
     try {
       resetConfirmSchema.parse(req.body);
@@ -133,7 +148,7 @@ settingsRouter.post(
 settingsRouter.post(
   "/reset/seed",
   blockInProduction,
-  requireRole(AdminRole.ADMIN),
+  requirePermission("configuration", "resetData"),
   async (req, res, next) => {
     try {
       resetConfirmSchema.parse(req.body);

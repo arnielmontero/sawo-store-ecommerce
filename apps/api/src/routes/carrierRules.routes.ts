@@ -1,7 +1,6 @@
 import { Router } from "express";
 import { z } from "zod";
-import { AdminRole } from "@prisma/client";
-import { requireAuth, requireRole } from "../middleware/requireAuth";
+import { requireAuth, requirePermission } from "../middleware/requireAuth";
 import { deleteCarrierRule, listCarrierRules, upsertCarrierRule } from "../services/carrier.service";
 
 export const carrierRulesRouter = Router();
@@ -22,7 +21,7 @@ const upsertSchema = z.object({
   carrier: z.string().min(1).max(40),
 });
 
-carrierRulesRouter.post("/", requireRole(AdminRole.ADMIN, AdminRole.MANAGER), async (req, res, next) => {
+carrierRulesRouter.post("/", requirePermission("carrierRules", "create"), async (req, res, next) => {
   try {
     const { country, carrier } = upsertSchema.parse(req.body);
     const rule = await upsertCarrierRule(country, carrier);
@@ -32,7 +31,7 @@ carrierRulesRouter.post("/", requireRole(AdminRole.ADMIN, AdminRole.MANAGER), as
   }
 });
 
-carrierRulesRouter.delete("/:id", requireRole(AdminRole.ADMIN, AdminRole.MANAGER), async (req, res, next) => {
+carrierRulesRouter.delete("/:id", requirePermission("carrierRules", "delete"), async (req, res, next) => {
   try {
     const id = Number(req.params.id);
     await deleteCarrierRule(id);

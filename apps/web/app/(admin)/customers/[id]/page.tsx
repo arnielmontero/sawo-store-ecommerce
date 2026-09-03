@@ -12,6 +12,7 @@ import {
 import { formatCents, formatPaymentMethod } from "@/lib/format";
 import { StatusBadge } from "@/components/StatusBadge";
 import { useAuth } from "@/lib/auth-context";
+import { hasPermission } from "@/lib/permissions";
 import { CartLeadsCard } from "@/components/CartLeadsCard";
 
 function formatDateTime(iso: string) {
@@ -78,8 +79,8 @@ export default function CustomerDetailPage() {
   const [answeringId, setAnsweringId] = useState<number | null>(null);
 
   const customerId = Number(params.id);
-  const canEdit = user?.role === "ADMIN";
-  const canLog = user?.role === "ADMIN" || user?.role === "FULFILLMENT_STAFF";
+  const canEdit = hasPermission(user, "customers", "edit");
+  const canLog = hasPermission(user, "customers", "logActivity");
 
   function load() {
     fetchCustomer(customerId)

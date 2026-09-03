@@ -1,13 +1,12 @@
 import { Router } from "express";
-import { requireAuth, requireRole } from "../middleware/requireAuth";
+import { requireAuth, requirePermission } from "../middleware/requireAuth";
 import { HttpError } from "../middleware/errorHandler";
-import { AdminRole } from "@prisma/client";
 import { upload } from "../lib/upload";
 import { env } from "../lib/env";
 
 export const uploadsRouter = Router();
 
-uploadsRouter.use(requireAuth, requireRole(AdminRole.ADMIN, AdminRole.MANAGER));
+uploadsRouter.use(requireAuth, requirePermission("catalog", "edit"));
 
 // Accepts a single image file (field name "file"), stores it to local disk
 // (see lib/upload.ts), and returns the absolute URL to save on a

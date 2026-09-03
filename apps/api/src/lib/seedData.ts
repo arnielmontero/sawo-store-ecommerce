@@ -6,6 +6,7 @@ import {
   ReturnRequestStatus,
   CouponType,
 } from "@prisma/client";
+import { PERMISSION_CATALOG, PRESET_GRANTS } from "../services/permission.service";
 import { prisma } from "./prisma";
 import { hashPassword } from "./password";
 import { env } from "./env";
@@ -19,16 +20,53 @@ function seedImage(filename: string): string {
   return `${env.API_BASE_URL}/uploads/seed/${filename}`;
 }
 
+// The permission catalog is reference data, not demo data — it defines what
+// checkboxes exist at all, so it's upserted (not count-guarded) to stay in
+// sync when a module/action is added to PERMISSION_CATALOG later.
+async function seedPermissions() {
+  for (const module of PERMISSION_CATALOG) {
+    for (const action of module.actions) {
+      await prisma.permission.upsert({
+        where: { module_action: { module: module.module, action } },
+        update: {},
+        create: { module: module.module, action },
+      });
+    }
+  }
+}
+
+// Grants an account exactly the permission set its role preset describes.
+// Used to give the seeded demo accounts the same access their old
+// role-based checks gave them, so nothing silently changes hands.
+async function grantPreset(adminUserId: number, role: AdminRole) {
+  const tokens = PRESET_GRANTS[role] ?? [];
+  const existing = await prisma.adminUserPermission.count({ where: { adminUserId } });
+  if (existing > 0) return;
+
+  for (const token of tokens) {
+    const [module, action] = token.split(":");
+    const permission = await prisma.permission.findUnique({
+      where: { module_action: { module, action } },
+    });
+    if (permission) {
+      await prisma.adminUserPermission.create({
+        data: { adminUserId, permissionId: permission.id },
+      });
+    }
+  }
+}
+
 async function seedAdmins() {
   const adminPasswordHash = await hashPassword("admin123");
-  await prisma.adminUser.upsert({
+  const admin = await prisma.adminUser.upsert({
     where: { username: "admin" },
     update: {},
     create: { username: "admin", passwordHash: adminPasswordHash, name: "Admin", role: AdminRole.ADMIN },
   });
+  await grantPreset(admin.id, AdminRole.ADMIN);
 
   const staffPasswordHash = await hashPassword("staff123");
-  await prisma.adminUser.upsert({
+  const staff = await prisma.adminUser.upsert({
     where: { username: "staff" },
     update: {},
     create: {
@@ -38,13 +76,14 @@ async function seedAdmins() {
       role: AdminRole.FULFILLMENT_STAFF,
     },
   });
+  await grantPreset(staff.id, AdminRole.FULFILLMENT_STAFF);
 
   // Demonstrates the middle role — day-to-day store operations (catalog,
   // coupons, customers, reviews, refunds) without Staff/Configuration/Tax
   // access (see the requireRole(...) calls across routes/*.ts for exactly
   // where MANAGER is and isn't granted).
   const managerPasswordHash = await hashPassword("manager123");
-  await prisma.adminUser.upsert({
+  const manager = await prisma.adminUser.upsert({
     where: { username: "manager" },
     update: {},
     create: {
@@ -54,6 +93,7 @@ async function seedAdmins() {
       role: AdminRole.MANAGER,
     },
   });
+  await grantPreset(manager.id, AdminRole.MANAGER);
 }
 
 const CUSTOMER_COUNT = 12;
@@ -2415,6 +2455,7 @@ async function backfillStockAdjustmentHistory() {
 // than the CLI (e.g. an API route building a JSON response) can surface the
 // same message.
 export async function runSeed(): Promise<string> {
+  await seedPermissions();
   await seedAdmins();
   await seedSettings();
   await seedCarrierRules();
@@ -2445,7 +2486,7 @@ export async function runSeed(): Promise<string> {
   const totalCustomers = customers.length + bulkCustomers.length;
   const totalOrders = ORDERS.length + 6 + BULK_ORDER_COUNT;
   return (
-    `Seeded admin user (admin / admin123), manager user (manager / manager123), staff user (staff / staff123), ${totalCustomers} customers, ` +
+    `Seeded ${PERMISSION_CATALOG.reduce((n, m) => n + m.actions.length, 0)} permissions across ${PERMISSION_CATALOG.length} modules, admin user (admin / admin123), manager user (manager / manager123), staff user (staff / staff123), ${totalCustomers} customers, ` +
     `${CATEGORIES.length} categories, ${productCount} products (${variantCount} variants), ${totalOrders} orders total ` +
     `(${BULK_ORDER_COUNT} bulk-generated over the past 12 months, 3 hand-crafted refund examples, 3 return-request ` +
     `examples covering pending/approved/rejected, and ${ORDERS.length} curated demo orders), 4 order notes, ` +

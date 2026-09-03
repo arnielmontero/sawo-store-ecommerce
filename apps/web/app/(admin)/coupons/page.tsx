@@ -10,6 +10,7 @@ import {
   type CouponType,
 } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
+import { hasPermission } from "@/lib/permissions";
 
 const TYPE_OPTIONS: { value: CouponType; label: string }[] = [
   { value: "PERCENTAGE", label: "Percentage off" },
@@ -32,7 +33,7 @@ function formatWindow(coupon: Coupon): string {
 
 export default function CouponsPage() {
   const { user } = useAuth();
-  const canEdit = user?.role === "ADMIN";
+  const canEdit = hasPermission(user, "coupons", "edit");
 
   const [coupons, setCoupons] = useState<Coupon[]>([]);
   const [loading, setLoading] = useState(true);

@@ -1,7 +1,6 @@
 import { Router } from "express";
 import { z } from "zod";
-import { AdminRole } from "@prisma/client";
-import { requireAuth, requireRole } from "../middleware/requireAuth";
+import { requireAuth, requirePermission } from "../middleware/requireAuth";
 import { HttpError } from "../middleware/errorHandler";
 import { getCustomerById, listCustomers, updateCustomerProfile } from "../services/customer.service";
 import { deleteCartLead, listCartLeadsForUser, logCartLead } from "../services/cartLead.service";
@@ -50,7 +49,7 @@ const updateProfileSchema = z.object({
   country: z.string().max(100).nullable().optional(),
 });
 
-customersRouter.patch("/:id", requireRole(AdminRole.ADMIN, AdminRole.MANAGER), async (req, res, next) => {
+customersRouter.patch("/:id", requirePermission("customers", "edit"), async (req, res, next) => {
   try {
     const id = Number(req.params.id);
     const input = updateProfileSchema.parse(req.body);
@@ -70,7 +69,7 @@ const logCartLeadSchema = z.object({
 
 customersRouter.post(
   "/:id/cart-leads",
-  requireRole(AdminRole.ADMIN, AdminRole.MANAGER, AdminRole.FULFILLMENT_STAFF),
+  requirePermission("customers", "logActivity"),
   async (req, res, next) => {
     try {
       const userId = Number(req.params.id);
@@ -95,7 +94,7 @@ customersRouter.get("/:id/cart-leads", async (req, res, next) => {
   }
 });
 
-customersRouter.delete("/cart-leads/:leadId", requireRole(AdminRole.ADMIN, AdminRole.MANAGER), async (req, res, next) => {
+customersRouter.delete("/cart-leads/:leadId", requirePermission("customers", "delete"), async (req, res, next) => {
   try {
     const leadId = Number(req.params.leadId);
     await deleteCartLead(leadId);

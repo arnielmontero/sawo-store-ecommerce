@@ -7,6 +7,8 @@ import { loginRateLimiter } from "../middleware/rateLimit";
 import { requireAuth } from "../middleware/requireAuth";
 import { HttpError } from "../middleware/errorHandler";
 import { prisma } from "../lib/prisma";
+import { AdminRole } from "@prisma/client";
+import { getPermissionTokensForUser } from "../services/permission.service";
 
 export const authRouter = Router();
 
@@ -23,8 +25,18 @@ function setRefreshCookie(res: Response, token: string) {
   });
 }
 
-function toPublicUser(user: { username: string; name: string; role: string }) {
-  return { username: user.username, name: user.name, role: user.role };
+// The session user carries the account's resolved permissions so the admin
+// UI can gate controls off the same source of truth the API enforces —
+// previously the frontend re-derived access from the role string alone,
+// which drifted out of sync with what the backend actually allowed.
+async function toPublicUser(user: { id: number; username: string; name: string; role: AdminRole }) {
+  return {
+    username: user.username,
+    name: user.name,
+    role: user.role,
+    isSuperAdmin: user.role === AdminRole.ADMIN,
+    permissions: await getPermissionTokensForUser(user.id),
+  };
 }
 
 const loginSchema = z.object({
@@ -42,7 +54,7 @@ authRouter.post("/login", loginRateLimiter, async (req, res, next) => {
     const refreshToken = await issueRefreshToken(user.id);
     setRefreshCookie(res, refreshToken);
 
-    res.json({ accessToken, user: toPublicUser(user) });
+    res.json({ accessToken, user: await toPublicUser(user) });
   } catch (err) {
     next(err);
   }
@@ -59,7 +71,7 @@ authRouter.post("/refresh", async (req, res, next) => {
     const accessToken = createAccessToken({ userId: rotated.user.id, role: rotated.user.role });
     setRefreshCookie(res, rotated.token);
 
-    res.json({ accessToken, user: toPublicUser(rotated.user) });
+    res.json({ accessToken, user: await toPublicUser(rotated.user) });
   } catch (err) {
     next(err);
   }
@@ -80,7 +92,7 @@ authRouter.get("/me", requireAuth, async (req, res, next) => {
   try {
     const user = await prisma.adminUser.findUnique({ where: { id: req.adminAuth?.userId } });
     if (!user) throw new HttpError(401, "Unauthorized");
-    res.json({ user: toPublicUser(user) });
+    res.json({ user: await toPublicUser(user) });
   } catch (err) {
     next(err);
   }

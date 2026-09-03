@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import { useStoreSettings } from "@/lib/store-settings-context";
 import { useAuth } from "@/lib/auth-context";
+import { hasPermission } from "@/lib/permissions";
 import type { AdminRole } from "@/lib/api";
 
 const ROLE_LABELS: Record<AdminRole, string> = {
@@ -143,7 +144,7 @@ export function Sidebar() {
               {open && (
                 <div className="mt-0.5 space-y-1">
                   {group.items
-                    .filter((item) => !item.adminOnly || user?.role === "ADMIN")
+                    .filter((item) => !item.adminOnly || hasPermission(user, "staff", "edit"))
                     .map((item) => (
                       <NavLink key={item.href} item={item} active={isActive(pathname, item.href)} />
                     ))}
@@ -153,7 +154,7 @@ export function Sidebar() {
           );
         })}
 
-        {user?.role === "ADMIN" && (
+        {hasPermission(user, "configuration", "view") && (
           <div className="pt-1">
             <NavLink item={{ href: "/configuration", label: "Configuration", icon: ConfigIcon }} active={isActive(pathname, "/configuration")} />
           </div>

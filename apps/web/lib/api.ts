@@ -5,7 +5,11 @@ export type AdminRole = "ADMIN" | "MANAGER" | "FULFILLMENT_STAFF";
 export interface SessionUser {
   username: string;
   name: string;
+  // Kept for the super-admin flag and preset display only — actual access
+  // is decided by `permissions` below (see lib/permissions.ts).
   role: AdminRole;
+  isSuperAdmin: boolean;
+  permissions: string[]; // "module:action" tokens, e.g. "orders:refund"
 }
 
 export type OrderStatus =
@@ -541,6 +545,10 @@ export async function fetchInvoiceUrl(orderId: number): Promise<string> {
   return URL.createObjectURL(blob);
 }
 
+export async function emailInvoice(orderId: number): Promise<{ sent: true; to: string }> {
+  return apiFetch(`/api/orders/${orderId}/invoice/email`, { method: "POST" });
+}
+
 export async function fetchOrderStatistics(): Promise<OrderStatistics> {
   return apiFetch("/api/orders/statistics");
 }
@@ -968,7 +976,25 @@ export interface StaffUser {
   username: string;
   name: string;
   role: AdminRole;
+  isSuperAdmin: boolean;
+  permissions: string[];
   createdAt: string;
+}
+
+export interface Permission {
+  id: number;
+  module: string;
+  action: string;
+}
+
+export interface PermissionCatalog {
+  permissions: Permission[];
+  catalog: { module: string; label: string; actions: string[] }[];
+  presets: Record<AdminRole, string[]>;
+}
+
+export async function fetchPermissionCatalog(): Promise<PermissionCatalog> {
+  return apiFetch("/api/v1/staff/permissions/catalog");
 }
 
 export async function fetchStaff(): Promise<StaffUser[]> {
@@ -976,12 +1002,12 @@ export async function fetchStaff(): Promise<StaffUser[]> {
   return data.users;
 }
 
-export async function createStaff(input: { username: string; password: string; name: string; role: AdminRole }): Promise<StaffUser> {
+export async function createStaff(input: { username: string; password: string; name: string; role: AdminRole; permissions?: string[] }): Promise<StaffUser> {
   const data = await apiFetch("/api/v1/staff", { method: "POST", body: JSON.stringify(input) });
   return data.user;
 }
 
-export async function updateStaff(id: number, input: { name?: string; role?: AdminRole; password?: string }): Promise<StaffUser> {
+export async function updateStaff(id: number, input: { name?: string; role?: AdminRole; password?: string; permissions?: string[] }): Promise<StaffUser> {
   const data = await apiFetch(`/api/v1/staff/${id}`, { method: "PATCH", body: JSON.stringify(input) });
   return data.user;
 }

@@ -27,6 +27,32 @@ const envSchema = z.object({
   // unset in dev leaves tracking creation a no-op (see shipping.service.ts)
   // rather than crashing the whole server over a nice-to-have integration.
   EASYPOST_API_KEY: z.string().optional(),
+  // Outgoing mail (order receipts, invoices). Optional for the same reason
+  // as Stripe/EasyPost above — an unconfigured mailer leaves sending a
+  // clearly-reported no-op (see lib/mailer.ts) rather than blocking the
+  // whole server from starting over an integration a dev box may not need.
+  SMTP_HOST: z.string().optional(),
+  SMTP_PORT: z.coerce.number().optional(),
+  // Whether to open the connection in TLS from the start. True for port 465
+  // (implicit TLS); false for 587, which starts plaintext and upgrades via
+  // STARTTLS — that's still encrypted, just negotiated after connecting.
+  SMTP_SECURE: z
+    .string()
+    .optional()
+    .transform((v) => v === "true"),
+  SMTP_USER: z.string().optional(),
+  SMTP_PASSWORD: z.string().optional(),
+  // Envelope From, e.g. `Sawo Store Admin <admin@sawo.com>`.
+  SMTP_FROM: z.string().optional(),
+  // IMAP is configuration-only for now — nothing in this codebase reads
+  // mail yet, but the connection details live here so they're in one place
+  // when a reply-handling feature needs them.
+  IMAP_HOST: z.string().optional(),
+  IMAP_PORT: z.coerce.number().optional(),
+  IMAP_SECURE: z
+    .string()
+    .optional()
+    .transform((v) => v !== "false"),
 });
 
 const parsed = envSchema.safeParse(process.env);

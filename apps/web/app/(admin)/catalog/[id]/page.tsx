@@ -20,6 +20,7 @@ import { AddVariantForm } from "@/components/AddVariantForm";
 import { TagInput } from "@/components/TagInput";
 import { ReviewsAndQnaPanel } from "@/components/ReviewsAndQnaPanel";
 import { useAuth } from "@/lib/auth-context";
+import { hasPermission } from "@/lib/permissions";
 
 const LOW_STOCK_THRESHOLD = 10;
 
@@ -732,7 +733,7 @@ export default function ProductDetailPage() {
         )}
       </div>
 
-      <ReviewsAndQnaPanel productId={product.id} canModerate={user?.role === "ADMIN"} />
+      <ReviewsAndQnaPanel productId={product.id} canModerate={hasPermission(user, "reviews", "delete")} />
     </div>
   );
 }

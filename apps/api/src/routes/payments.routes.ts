@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { z } from "zod";
-import { AdminRole, OrderStatus, PaymentMethod } from "@prisma/client";
-import { requireAuth, requireRole } from "../middleware/requireAuth";
+import { OrderStatus, PaymentMethod } from "@prisma/client";
+import { requireAuth, requirePermission } from "../middleware/requireAuth";
 import { HttpError } from "../middleware/errorHandler";
 import { getStripeWebhookSecret } from "../lib/credentials";
 import {
@@ -39,7 +39,7 @@ const listQuerySchema = z
   });
 
 // Admin only — list of orders that have gone through payment processing.
-paymentsRouter.get("/", requireAuth, requireRole(AdminRole.ADMIN, AdminRole.MANAGER, AdminRole.FULFILLMENT_STAFF), async (req, res, next) => {
+paymentsRouter.get("/", requireAuth, requirePermission("payments", "view"), async (req, res, next) => {
   try {
     const filters = listQuerySchema.parse(req.query);
     const result = await listPayments(filters);
@@ -55,7 +55,7 @@ paymentsRouter.get("/", requireAuth, requireRole(AdminRole.ADMIN, AdminRole.MANA
 paymentsRouter.get(
   "/export",
   requireAuth,
-  requireRole(AdminRole.ADMIN, AdminRole.MANAGER, AdminRole.FULFILLMENT_STAFF),
+  requirePermission("payments", "view"),
   async (req, res, next) => {
     try {
       const filters = listQuerySchema.parse(req.query);
@@ -120,7 +120,7 @@ const refundSchema = z.object({
 
 // Admin only — matches the diagram ("Admin: Initiates full or partial
 // refunds").
-paymentsRouter.post("/refund", requireAuth, requireRole(AdminRole.ADMIN, AdminRole.MANAGER), async (req, res, next) => {
+paymentsRouter.post("/refund", requireAuth, requirePermission("orders", "refund"), async (req, res, next) => {
   try {
     const { orderId, amountCents, items } = refundSchema.parse(req.body);
     const { order } = await refundOrder(orderId, { amountCents, items });

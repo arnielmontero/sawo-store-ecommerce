@@ -9,6 +9,7 @@ import { OrderRowMenu } from "@/components/OrderRowMenu";
 import { OrderStatisticsPanel } from "@/components/OrderStatisticsPanel";
 import { HeldOrdersPanel } from "@/components/HeldOrdersPanel";
 import { useAuth } from "@/lib/auth-context";
+import { hasPermission } from "@/lib/permissions";
 import { useStoreSettings } from "@/lib/store-settings-context";
 
 const STATUS_OPTIONS: OrderStatus[] = [
@@ -78,7 +79,7 @@ export default function OrdersPage() {
     setPage(1);
   }
 
-  const canAct = user?.role === "ADMIN" || user?.role === "FULFILLMENT_STAFF";
+  const canAct = hasPermission(user, "orders", "changeStatus");
 
   async function handleTransition(orderId: number, status: OrderStatus) {
     setActionError(null);

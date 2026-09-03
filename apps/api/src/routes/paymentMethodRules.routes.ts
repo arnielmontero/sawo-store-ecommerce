@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { z } from "zod";
-import { AdminRole, PaymentMethod } from "@prisma/client";
-import { requireAuth, requireRole } from "../middleware/requireAuth";
+import { PaymentMethod } from "@prisma/client";
+import { requireAuth, requirePermission } from "../middleware/requireAuth";
 import { listPaymentMethodRules, setPaymentMethodRules } from "../services/paymentMethodRule.service";
 
 export const paymentMethodRulesRouter = Router();
@@ -25,7 +25,7 @@ const setSchema = z.object({
 // Replaces the full set of allowed methods for a country — passing an empty
 // array clears the rule entirely (back to "no restriction" for that
 // country, see paymentMethodRule.service.ts's isPaymentMethodAllowed).
-paymentMethodRulesRouter.put("/:country", requireRole(AdminRole.ADMIN, AdminRole.MANAGER), async (req, res, next) => {
+paymentMethodRulesRouter.put("/:country", requirePermission("paymentMethodRules", "edit"), async (req, res, next) => {
   try {
     const { country, methods } = setSchema.parse({ ...req.body, country: req.params.country });
     const rules = await setPaymentMethodRules(country, methods);

@@ -8,6 +8,7 @@ import {
   type InventorySummary,
 } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
+import { hasPermission } from "@/lib/permissions";
 import { AdjustStockModal } from "@/components/AdjustStockModal";
 import { StockHistoryPanel } from "@/components/StockHistoryPanel";
 
@@ -15,7 +16,7 @@ type StockFilter = "" | "low" | "out";
 
 export default function InventoryPage() {
   const { user } = useAuth();
-  const canAdjust = user?.role === "ADMIN";
+  const canAdjust = hasPermission(user, "inventory", "adjustStock");
 
   const [variants, setVariants] = useState<InventoryRow[]>([]);
   const [pagination, setPagination] = useState({ page: 1, pageSize: 20, total: 0, totalPages: 1 });

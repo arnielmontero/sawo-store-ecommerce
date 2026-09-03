@@ -1,8 +1,8 @@
 import { Router } from "express";
 import { z } from "zod";
-import { OrderStatus, PaymentMethod, AdminRole } from "@prisma/client";
+import { OrderStatus, PaymentMethod } from "@prisma/client";
 import { prisma } from "../lib/prisma";
-import { requireAuth, requireRole } from "../middleware/requireAuth";
+import { requireAuth, requirePermission } from "../middleware/requireAuth";
 import { checkoutRateLimiter } from "../middleware/rateLimit";
 import { HttpError } from "../middleware/errorHandler";
 import {
@@ -11,6 +11,7 @@ import {
   exportOrdersXlsx,
   getOrderById,
   getOrdersForUser,
+  getOrderByReference,
   getOrderStatistics,
   getTopProducts,
   listHeldOrders,
@@ -20,6 +21,7 @@ import {
 import { approveReturnRequest, logReturnRequest, rejectReturnRequest } from "../services/returnRequest.service";
 import { getStoreSettings } from "../services/settings.service";
 import { buildInvoicePdf } from "../lib/invoicePdf";
+import { sendMail, isMailerConfigured } from "../lib/mailer";
 
 export const ordersRouter = Router();
 
@@ -47,6 +49,23 @@ ordersRouter.post("/checkout", checkoutRateLimiter, async (req, res, next) => {
     const input = checkoutSchema.parse(req.body);
     const order = await checkout(input);
     res.status(201).json({ order });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Public order tracking. Unauthenticated by design — there's no customer
+// login, so the order reference handed out at checkout is the credential.
+// getOrderByReference() returns only shipping-status fields (no address,
+// email, or payment details), so this stays safe to expose. Rate-limited
+// with the same limiter as checkout so the reference space can't be
+// cheaply brute-forced.
+ordersRouter.get("/track/:reference", checkoutRateLimiter, async (req, res, next) => {
+  try {
+    const reference = z.string().min(3).max(40).parse(req.params.reference).toUpperCase();
+    const order = await getOrderByReference(reference);
+    if (!order) throw new HttpError(404, "No order found with that tracking reference");
+    res.json({ order });
   } catch (err) {
     next(err);
   }
@@ -154,6 +173,48 @@ ordersRouter.get("/:id", async (req, res, next) => {
   }
 });
 
+// Emails the same PDF the download route produces, to the order's customer.
+// Gated on orders:edit rather than a mail-specific permission — sending a
+// customer their own receipt is ordinary order handling, not a separate
+// capability worth its own checkbox.
+ordersRouter.post("/:id/invoice/email", requirePermission("orders", "edit"), async (req, res, next) => {
+  try {
+    const id = Number(req.params.id);
+    const order = await getOrderById(id);
+    if (!order) throw new HttpError(404, "Order not found");
+    if (!order.user?.email) {
+      throw new HttpError(400, "This order has no customer email address to send to.");
+    }
+    if (!isMailerConfigured()) {
+      throw new HttpError(503, "Email isn't configured yet — add SMTP settings to the API's .env.");
+    }
+
+    const settings = await getStoreSettings();
+    const pdf = await buildInvoicePdf(order, settings.storeName);
+
+    try {
+      await sendMail({
+        to: order.user.email,
+        subject: `Your ${settings.storeName} receipt — ${order.reference}`,
+        text: `Thanks for your order.\n\nYour receipt for order ${order.reference} is attached as a PDF.\n\n— ${settings.storeName}`,
+        attachments: [
+          { filename: `invoice-${order.reference}.pdf`, content: pdf, contentType: "application/pdf" },
+        ],
+      });
+    } catch (mailErr) {
+      // A DNS/auth/connection failure here is a mail-server config problem,
+      // not a bug in this route — surface it as a clear 502 rather than
+      // letting it fall through to a generic 500 with no actionable detail.
+      const detail = mailErr instanceof Error ? mailErr.message : "Unknown error";
+      throw new HttpError(502, `Couldn't reach the mail server: ${detail}`);
+    }
+
+    res.json({ sent: true, to: order.user.email });
+  } catch (err) {
+    next(err);
+  }
+});
+
 ordersRouter.get("/:id/invoice", async (req, res, next) => {
   try {
     const id = Number(req.params.id);
@@ -200,7 +261,7 @@ const logReturnRequestSchema = z.object({
 // move money on its own.
 ordersRouter.post(
   "/:id/return-requests",
-  requireRole(AdminRole.ADMIN, AdminRole.MANAGER, AdminRole.FULFILLMENT_STAFF),
+  requirePermission("orders", "changeStatus"),
   async (req, res, next) => {
     try {
       const orderId = Number(req.params.id);
@@ -225,7 +286,7 @@ const approveReturnRequestSchema = z.object({
 // refund endpoint.
 ordersRouter.post(
   "/return-requests/:requestId/approve",
-  requireRole(AdminRole.ADMIN, AdminRole.MANAGER),
+  requirePermission("orders", "refund"),
   async (req, res, next) => {
     try {
       const requestId = Number(req.params.requestId);
@@ -244,7 +305,7 @@ const rejectReturnRequestSchema = z.object({ reviewNote: z.string().max(2000).op
 
 ordersRouter.post(
   "/return-requests/:requestId/reject",
-  requireRole(AdminRole.ADMIN, AdminRole.MANAGER),
+  requirePermission("orders", "changeStatus"),
   async (req, res, next) => {
     try {
       const requestId = Number(req.params.requestId);
@@ -267,7 +328,7 @@ const updateStatusSchema = z.object({ status: z.nativeEnum(OrderStatus) });
 // step, regardless of role.
 ordersRouter.patch(
   "/:id/status",
-  requireRole(AdminRole.ADMIN, AdminRole.MANAGER, AdminRole.FULFILLMENT_STAFF),
+  requirePermission("orders", "changeStatus"),
   async (req, res, next) => {
     try {
       const id = Number(req.params.id);

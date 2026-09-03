@@ -1,7 +1,6 @@
 import { Router } from "express";
 import { z } from "zod";
-import { AdminRole } from "@prisma/client";
-import { requireAuth, requireRole } from "../middleware/requireAuth";
+import { requireAuth, requirePermission } from "../middleware/requireAuth";
 import { deleteTaxRule, listTaxRules, upsertTaxRule } from "../services/taxRule.service";
 
 export const taxRulesRouter = Router();
@@ -22,7 +21,7 @@ const upsertSchema = z.object({
   ratePercent: z.number().min(0).max(100),
 });
 
-taxRulesRouter.post("/", requireRole(AdminRole.ADMIN), async (req, res, next) => {
+taxRulesRouter.post("/", requirePermission("taxRules", "create"), async (req, res, next) => {
   try {
     const { country, ratePercent } = upsertSchema.parse(req.body);
     const rule = await upsertTaxRule(country, ratePercent);
@@ -32,7 +31,7 @@ taxRulesRouter.post("/", requireRole(AdminRole.ADMIN), async (req, res, next) =>
   }
 });
 
-taxRulesRouter.delete("/:id", requireRole(AdminRole.ADMIN), async (req, res, next) => {
+taxRulesRouter.delete("/:id", requirePermission("taxRules", "delete"), async (req, res, next) => {
   try {
     const id = Number(req.params.id);
     await deleteTaxRule(id);

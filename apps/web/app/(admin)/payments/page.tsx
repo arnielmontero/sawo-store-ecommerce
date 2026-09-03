@@ -16,6 +16,7 @@ import { formatCents, formatPaymentMethod } from "@/lib/format";
 import { StatusBadge } from "@/components/StatusBadge";
 import { MultiSelectDropdown } from "@/components/MultiSelectDropdown";
 import { useAuth } from "@/lib/auth-context";
+import { hasPermission } from "@/lib/permissions";
 
 const SORTABLE_COLUMNS: { field: PaymentSortField; label: string }[] = [
   { field: "createdAt", label: "Date" },
@@ -283,7 +284,7 @@ export default function PaymentsPage() {
                       <StatusBadge status={payment.status} />
                     </td>
                     <td className="px-5 py-3 text-right">
-                      {payment.status === "PAID" && user?.role === "ADMIN" && (
+                      {payment.status === "PAID" && hasPermission(user, "orders", "refund") && (
                         <button
                           onClick={() => handleRefund(payment.id)}
                           disabled={refundingId === payment.id}

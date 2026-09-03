@@ -1,7 +1,6 @@
 import { Router } from "express";
 import { z } from "zod";
-import { AdminRole } from "@prisma/client";
-import { requireAuth, requireRole } from "../middleware/requireAuth";
+import { requireAuth, requirePermission } from "../middleware/requireAuth";
 import {
   listShipments,
   exportShipmentsXlsx,
@@ -12,7 +11,7 @@ import {
 
 export const shippingRouter = Router();
 
-shippingRouter.use(requireAuth, requireRole(AdminRole.ADMIN, AdminRole.MANAGER, AdminRole.FULFILLMENT_STAFF));
+shippingRouter.use(requireAuth, requirePermission("deliveries", "manage"));
 
 // carrier/country arrive as either a single string or an array depending on
 // how many values are selected — standard Express query-parsing behavior

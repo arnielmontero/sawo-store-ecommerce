@@ -9,6 +9,7 @@ import {
   type Category,
 } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
+import { hasPermission } from "@/lib/permissions";
 
 export function CategoriesPanel({
   onClose,
@@ -22,7 +23,7 @@ export function CategoriesPanel({
   onChanged: () => void;
 }) {
   const { user } = useAuth();
-  const canEdit = user?.role === "ADMIN";
+  const canEdit = hasPermission(user, "catalog", "edit");
 
   const [categories, setCategories] = useState<Category[] | null>(null);
   const [error, setError] = useState<string | null>(null);

@@ -15,6 +15,7 @@ import {
   type Product,
 } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
+import { hasPermission } from "@/lib/permissions";
 
 type Tab = "reviews" | "questions";
 
@@ -58,7 +59,7 @@ function useProductSearch() {
 
 export default function ReviewsPage() {
   const { user } = useAuth();
-  const canModerate = user?.role === "ADMIN";
+  const canModerate = hasPermission(user, "reviews", "delete");
 
   const [tab, setTab] = useState<Tab>("reviews");
 

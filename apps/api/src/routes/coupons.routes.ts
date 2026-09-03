@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { z } from "zod";
-import { AdminRole, CouponType } from "@prisma/client";
-import { requireAuth, requireRole } from "../middleware/requireAuth";
+import { CouponType } from "@prisma/client";
+import { requireAuth, requirePermission } from "../middleware/requireAuth";
 import { checkoutRateLimiter } from "../middleware/rateLimit";
 import { priceCart } from "../services/pricing.service";
 import { listCoupons, createCoupon, updateCoupon, deleteCoupon } from "../services/coupon.service";
@@ -78,7 +78,7 @@ const couponSchema = z
     { message: "value must match the coupon type's rules", path: ["value"] }
   );
 
-couponsRouter.post("/", requireRole(AdminRole.ADMIN, AdminRole.MANAGER), async (req, res, next) => {
+couponsRouter.post("/", requirePermission("coupons", "create"), async (req, res, next) => {
   try {
     const input = couponSchema.parse(req.body);
     const coupon = await createCoupon(input);
@@ -97,7 +97,7 @@ const updateSchema = z.object({
   isActive: z.boolean().optional(),
 });
 
-couponsRouter.patch("/:id", requireRole(AdminRole.ADMIN, AdminRole.MANAGER), async (req, res, next) => {
+couponsRouter.patch("/:id", requirePermission("coupons", "edit"), async (req, res, next) => {
   try {
     const id = Number(req.params.id);
     const input = updateSchema.parse(req.body);
@@ -108,7 +108,7 @@ couponsRouter.patch("/:id", requireRole(AdminRole.ADMIN, AdminRole.MANAGER), asy
   }
 });
 
-couponsRouter.delete("/:id", requireRole(AdminRole.ADMIN, AdminRole.MANAGER), async (req, res, next) => {
+couponsRouter.delete("/:id", requirePermission("coupons", "delete"), async (req, res, next) => {
   try {
     const id = Number(req.params.id);
     await deleteCoupon(id);

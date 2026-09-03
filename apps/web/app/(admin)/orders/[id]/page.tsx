@@ -3,10 +3,11 @@
 import { useEffect, useState } from "react";
 import { useParams, useSearchParams } from "next/navigation";
 import Link from "next/link";
-import { fetchOrder, updateOrderStatus, refundPayment, addOrderNote, fetchInvoiceUrl, type OrderDetail, type OrderStatus } from "@/lib/api";
+import { fetchOrder, updateOrderStatus, refundPayment, addOrderNote, fetchInvoiceUrl, emailInvoice, type OrderDetail, type OrderStatus } from "@/lib/api";
 import { formatCents, formatPaymentMethod } from "@/lib/format";
 import { StatusBadge } from "@/components/StatusBadge";
 import { useAuth } from "@/lib/auth-context";
+import { hasPermission } from "@/lib/permissions";
 import { useStoreSettings } from "@/lib/store-settings-context";
 import { NEXT_STATES, ACTION_LABELS, STATUS_HISTORY_LABELS, HAPPY_PATH_STATUSES } from "@/lib/orderStateMachine";
 import { RefundPanel } from "@/components/RefundPanel";
@@ -33,6 +34,22 @@ export default function OrderDetailPage() {
   const [noteError, setNoteError] = useState<string | null>(null);
   const [noteSaving, setNoteSaving] = useState(false);
   const [invoiceLoading, setInvoiceLoading] = useState(false);
+  const [emailingInvoice, setEmailingInvoice] = useState(false);
+  const [emailSentMsg, setEmailSentMsg] = useState<string | null>(null);
+
+  async function handleEmailInvoice() {
+    if (!order) return;
+    setEmailingInvoice(true);
+    setEmailSentMsg(null);
+    try {
+      const result = await emailInvoice(order.id);
+      setEmailSentMsg(`Receipt emailed to ${result.to}`);
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : "Failed to email the receipt.");
+    } finally {
+      setEmailingInvoice(false);
+    }
+  }
 
   async function handleDownloadInvoice() {
     if (!order) return;
@@ -102,8 +119,8 @@ export default function OrderDetailPage() {
   if (error) return <p className="text-sm text-brand-600">{error}</p>;
   if (!order) return null;
 
-  const canStaffAct = !readOnly && (user?.role === "ADMIN" || user?.role === "FULFILLMENT_STAFF");
-  const canReviewReturns = !readOnly && user?.role === "ADMIN";
+  const canStaffAct = !readOnly && hasPermission(user, "orders", "changeStatus");
+  const canReviewReturns = !readOnly && hasPermission(user, "orders", "refund");
 
   // Fixed happy-path roadmap (Placed -> Paid -> Shipped -> Delivered) so a
   // step not yet reached still gets a slot in the timeline, shown greyed out
@@ -142,6 +159,15 @@ export default function OrderDetailPage() {
           >
             {invoiceLoading ? "Generating..." : "Download invoice"}
           </button>
+          {canStaffAct && order.user?.email && (
+            <button
+              onClick={handleEmailInvoice}
+              disabled={emailingInvoice}
+              className="rounded-md border border-ink-100 px-4 py-2 text-sm font-medium text-ink-700 hover:bg-gray-50 disabled:opacity-50"
+            >
+              {emailingInvoice ? "Sending..." : "Email receipt"}
+            </button>
+          )}
           {canStaffAct && NEXT_STATES[order.status].length > 0 && (
             <>
             {NEXT_STATES[order.status].map((next) => (
@@ -165,6 +191,9 @@ export default function OrderDetailPage() {
 
       {actionError && (
         <p className="mt-4 rounded-md bg-brand-50 px-4 py-2 text-sm text-brand-600">{actionError}</p>
+      )}
+      {emailSentMsg && (
+        <p className="mt-4 rounded-md bg-green-50 px-4 py-2 text-sm text-green-700">{emailSentMsg}</p>
       )}
 
       {refundPanelOpen && (
