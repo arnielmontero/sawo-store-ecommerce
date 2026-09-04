@@ -5,11 +5,23 @@ import { requireAuth, requirePermission } from "../middleware/requireAuth";
 import { HttpError } from "../middleware/errorHandler";
 import { upload } from "../lib/upload";
 import { env } from "../lib/env";
-import { getStoreSettings, updateStoreSettings } from "../services/settings.service";
+import { getStoreSettings, updateStoreSettings, getPublicBranding } from "../services/settings.service";
 import { clearAllData, resetSeedData } from "../services/dataReset.service";
 import { isMailerConfigured, verifyMailer } from "../lib/mailer";
 
 export const settingsRouter = Router();
+
+// Public, unauthenticated — the storefront's favicon/title and any other
+// public branding reads reach this before requireAuth below applies to
+// everything else on this router.
+settingsRouter.get("/branding", async (_req, res, next) => {
+  try {
+    const branding = await getPublicBranding();
+    res.json(branding);
+  } catch (err) {
+    next(err);
+  }
+});
 
 settingsRouter.use(requireAuth);
 

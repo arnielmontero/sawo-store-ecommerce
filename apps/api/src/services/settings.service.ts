@@ -16,6 +16,15 @@ export async function getRawStoreSettings() {
   });
 }
 
+// Unauthenticated subset for public-facing branding (storefront favicon/
+// title, e.g.) — everything else on StoreSettings (carrier config, refund
+// policy, credential-configured flags) is backoffice-only, so this
+// deliberately returns just the two fields safe to expose with no auth.
+export async function getPublicBranding() {
+  const settings = await getRawStoreSettings();
+  return { storeName: settings.storeName, logoUrl: settings.logoUrl };
+}
+
 // The raw secret fields never leave the server once saved — GET /settings
 // (and everywhere else this is returned to the frontend) reports only
 // whether each one is set, not its value, so Configuration can render
