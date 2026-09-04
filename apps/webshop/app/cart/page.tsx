@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useCart } from "@/context/CartContext";
 import { formatCents, isRenderableImageUrl } from "@/lib/format";
 import { ProductImagePlaceholder } from "@/components/ProductImagePlaceholder";
+import { CartQuantitySelect } from "@/components/CartQuantitySelect";
 
 export default function CartPage() {
   const { items, removeItem, setQuantity, subtotalCents } = useCart();
@@ -45,19 +46,11 @@ export default function CartPage() {
                 </Link>
                 {item.variantLabel && <span className="text-sm text-ink-500">{item.variantLabel}</span>}
                 <div className="mt-auto flex items-center gap-4 pt-2">
-                  <select
-                    value={item.quantity}
-                    onChange={(e) => setQuantity(item.variantId, Number(e.target.value))}
-                    className="rounded-lg border border-ink-100 bg-white px-2 py-1.5 text-sm"
-                  >
-                    {Array.from({ length: Math.max(item.quantity, Math.min(item.availableStock, 10)) }, (_, i) => i + 1).map(
-                      (n) => (
-                        <option key={n} value={n}>
-                          {n}
-                        </option>
-                      )
-                    )}
-                  </select>
+                  <CartQuantitySelect
+                    quantity={item.quantity}
+                    availableStock={item.availableStock}
+                    onChange={(quantity) => setQuantity(item.variantId, quantity)}
+                  />
                   <button
                     type="button"
                     onClick={() => removeItem(item.variantId)}

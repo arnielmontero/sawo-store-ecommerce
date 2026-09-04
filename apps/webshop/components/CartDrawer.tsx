@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useCart } from "@/context/CartContext";
 import { formatCents, isRenderableImageUrl } from "@/lib/format";
 import { ProductImagePlaceholder } from "./ProductImagePlaceholder";
+import { CartQuantitySelect } from "./CartQuantitySelect";
 
 export function CartDrawer() {
   const { items, isOpen, closeCart, removeItem, setQuantity, subtotalCents } = useCart();
@@ -25,7 +26,12 @@ export function CartDrawer() {
       >
         <div className="flex items-center justify-between border-b border-ink-100 px-6 py-5">
           <h2 className="font-serif text-lg font-semibold text-ink-900">Your Cart</h2>
-          <button type="button" onClick={closeCart} className="text-2xl leading-none text-ink-500 hover:text-ink-900">
+          <button
+            type="button"
+            onClick={closeCart}
+            aria-label="Close cart"
+            className="text-2xl leading-none text-ink-500 hover:text-ink-900"
+          >
             ×
           </button>
         </div>
@@ -50,19 +56,12 @@ export function CartDrawer() {
                     </Link>
                     {item.variantLabel && <span className="text-xs text-ink-500">{item.variantLabel}</span>}
                     <div className="mt-2 flex items-center gap-3">
-                      <select
-                        value={item.quantity}
-                        onChange={(e) => setQuantity(item.variantId, Number(e.target.value))}
-                        className="rounded-lg border border-ink-100 bg-white px-2 py-1 text-sm"
-                      >
-                        {Array.from({ length: Math.max(item.quantity, Math.min(item.availableStock, 10)) }, (_, i) => i + 1).map(
-                          (n) => (
-                            <option key={n} value={n}>
-                              {n}
-                            </option>
-                          )
-                        )}
-                      </select>
+                      <CartQuantitySelect
+                        quantity={item.quantity}
+                        availableStock={item.availableStock}
+                        onChange={(quantity) => setQuantity(item.variantId, quantity)}
+                        className="py-1"
+                      />
                       <button
                         type="button"
                         onClick={() => removeItem(item.variantId)}

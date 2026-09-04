@@ -83,6 +83,8 @@ export function ProductDetailView({ product, breadcrumbs }: { product: ProductDe
                   key={img.id}
                   type="button"
                   onClick={() => setActiveImageIndex(index)}
+                  aria-label={`Show image ${index + 1} of ${images.length} for ${product.title}`}
+                  aria-pressed={index === activeImageIndex}
                   className={`relative h-20 w-20 overflow-hidden rounded-xl border-2 ${
                     index === activeImageIndex ? "border-cedar-500" : "border-transparent"
                   }`}

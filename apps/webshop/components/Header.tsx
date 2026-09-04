@@ -38,6 +38,7 @@ export function Header() {
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Search sauna products…"
+            aria-label="Search sauna products"
             className="w-full rounded-full border border-ink-100 bg-white px-4 py-2 text-sm text-ink-900 placeholder:text-ink-300 focus:border-cedar-400 focus:outline-none"
           />
         </form>

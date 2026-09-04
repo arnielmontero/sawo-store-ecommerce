@@ -27,6 +27,18 @@ export interface ProductImage {
   isFeatured: boolean;
 }
 
+// Just enough to "quick add" a single-variant product straight from a grid
+// card — the full variant shape (sale windows, weight, etc.) lives on
+// ProductDetail; this stays deliberately thin. Stock is nested under
+// `inventory` here (matches the raw ProductVariant/Inventory relation the
+// API's list endpoint returns), unlike ProductDetail's VariantDetail which
+// flattens it into a computed availableStock.
+export interface ProductListVariant {
+  id: number;
+  priceCents: number;
+  inventory: { stockQuantity: number; reservedQuantity: number } | null;
+}
+
 export interface Product {
   id: number;
   title: string;
@@ -39,6 +51,7 @@ export interface Product {
   featuredImageUrl: string | null;
   category: { id: number; name: string; slug: string } | null;
   tags: Tag[];
+  variants: ProductListVariant[];
   variantCount: number;
   totalStock: number;
   rating: number | null;
@@ -332,12 +345,19 @@ export async function fetchAllProducts(
   } = {}
 ): Promise<Product[]> {
   const first = await fetchProducts({ ...params, page: 1 });
-  const products = [...first.products];
-  for (let page = 2; page <= first.pagination.totalPages; page++) {
-    const next = await fetchProducts({ ...params, page });
-    products.push(...next.products);
-  }
-  return products;
+  if (first.pagination.totalPages <= 1) return first.products;
+
+  // Remaining pages are independent requests (each page is server-sorted on
+  // its own params, not dependent on a previous page's result), so fetch
+  // them in parallel instead of one round-trip at a time — this used to be
+  // a serial `for` loop, which meant catalog page load time grew linearly
+  // with page count instead of being bounded by the slowest single request.
+  const remainingPages = Array.from(
+    { length: first.pagination.totalPages - 1 },
+    (_, i) => i + 2
+  );
+  const rest = await Promise.all(remainingPages.map((page) => fetchProducts({ ...params, page })));
+  return [...first.products, ...rest.flatMap((page) => page.products)];
 }
 
 export async function fetchProduct(slug: string): Promise<ProductDetail | null> {

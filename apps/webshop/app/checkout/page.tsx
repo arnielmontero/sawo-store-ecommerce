@@ -14,6 +14,25 @@ import {
   type ShippingQuote,
 } from "@/lib/api";
 import { COUNTRIES } from "@/lib/countries";
+import type { CartItem } from "@/context/CartContext";
+
+// checkout() on the API throws a 409 "Not enough stock for variant {id}" —
+// accurate for the server, meaningless to a customer staring at a cart full
+// of product names. This turns it back into the product they actually have
+// in their cart before showing it, so "which item do I remove?" has an
+// answer instead of a bare error banner.
+function describeCheckoutError(err: unknown, cartItems: CartItem[]): string {
+  const message = err instanceof Error ? err.message : "";
+  const stockMatch = message.match(/Not enough stock for variant (\d+)/);
+  if (stockMatch) {
+    const variantId = Number(stockMatch[1]);
+    const item = cartItems.find((i) => i.variantId === variantId);
+    return item
+      ? `Sorry, "${item.productTitle}${item.variantLabel ? ` (${item.variantLabel})` : ""}" no longer has enough stock for the quantity in your cart. Please update the quantity or remove it, then try again.`
+      : "One of the items in your cart no longer has enough stock. Please review your cart and try again.";
+  }
+  return message || "Something went wrong placing your order. Please try again.";
+}
 
 // Places a REAL order: POST /api/orders/checkout creates a PENDING Order,
 // reserves stock, and is immediately visible in the admin backoffice. What
@@ -47,6 +66,11 @@ export default function CheckoutPage() {
 
   const cartItemsForQuote = items.map((item) => ({ variantId: item.variantId, quantity: item.quantity }));
   const addressComplete = Boolean(addressLine1.trim() && city.trim() && region.trim() && postalCode.trim());
+  // availableStock is a snapshot from add-to-cart time and can go stale,
+  // but a cart item already showing 0 stock is a known-bad state worth
+  // blocking on client-side rather than waiting for the server's 409 —
+  // the server still re-checks authoritatively for everything else.
+  const hasOutOfStockItem = items.some((item) => item.availableStock <= 0);
 
   // Early estimate — fires as soon as a country is picked, using a
   // representative city for that country server-side (see
@@ -153,9 +177,7 @@ export default function CheckoutPage() {
       clear();
       router.push(`/order-confirmation?ref=${order.reference}`);
     } catch (err) {
-      setSubmitError(
-        err instanceof Error ? err.message : "Something went wrong placing your order. Please try again."
-      );
+      setSubmitError(describeCheckoutError(err, items));
       setSubmitting(false);
     }
   }
@@ -385,12 +407,21 @@ export default function CheckoutPage() {
               <span>{formatCents(displayTotalCents)}</span>
             </div>
           </div>
+          {hasOutOfStockItem && (
+            <p className="mt-4 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
+              One or more items in your cart are no longer in stock. Remove or update them in your{" "}
+              <Link href="/cart" className="underline">
+                cart
+              </Link>{" "}
+              before checking out.
+            </p>
+          )}
           {submitError && (
             <p className="mt-4 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{submitError}</p>
           )}
           <button
             type="submit"
-            disabled={submitting}
+            disabled={submitting || hasOutOfStockItem}
             className="mt-6 w-full rounded-full bg-cedar-600 px-4 py-3 text-sm font-semibold text-white hover:bg-cedar-700 disabled:opacity-60"
           >
             {submitting ? "Placing Order…" : "Place Order"}

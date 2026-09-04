@@ -19,10 +19,22 @@ function findParent(categories: Category[], slug: string) {
   return categories.find((category) => category.children.some((c) => c.slug === slug)) ?? null;
 }
 
-const SORT_COMPARATORS: Record<string, (a: { basePriceCents: number; title: string }, b: { basePriceCents: number; title: string }) => number> = {
+// Mirrors every option SortControl actually offers ("Newest" included —
+// this previously only had price/name, so picking "Newest" on a category
+// page silently no-opped since the comparator lookup missed and left the
+// list in whatever order the API happened to return). Product has no
+// createdAt field on the client, but id is a reliable creation-order proxy
+// here (Prisma @default(autoincrement()), never client-set).
+type SortableProduct = { id: number; basePriceCents: number; title: string; totalStock: number };
+const SORT_COMPARATORS: Record<string, (a: SortableProduct, b: SortableProduct) => number> = {
   "price-asc": (a, b) => a.basePriceCents - b.basePriceCents,
   "price-desc": (a, b) => b.basePriceCents - a.basePriceCents,
   "name-asc": (a, b) => a.title.localeCompare(b.title),
+  "name-desc": (a, b) => b.title.localeCompare(a.title),
+  "createdAt-desc": (a, b) => b.id - a.id,
+  "createdAt-asc": (a, b) => a.id - b.id,
+  "stock-asc": (a, b) => a.totalStock - b.totalStock,
+  "stock-desc": (a, b) => b.totalStock - a.totalStock,
 };
 
 export default async function CategoryPage({

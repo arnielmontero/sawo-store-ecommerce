@@ -1,11 +1,15 @@
+"use client";
+
 import Image from "next/image";
 import Link from "next/link";
 import type { Product } from "@/lib/api";
 import { formatCents } from "@/lib/format";
 import { ProductImagePlaceholder } from "./ProductImagePlaceholder";
 import { StarRating } from "./StarRating";
+import { useCart } from "@/context/CartContext";
 
 export function ProductCard({ product }: { product: Product }) {
+  const { addItem } = useCart();
   const image = product.featuredImageUrl ?? product.imageUrl;
   const outOfStock = product.totalStock <= 0;
   const lowStock = !outOfStock && product.totalStock <= 5;
@@ -13,6 +17,31 @@ export function ProductCard({ product }: { product: Product }) {
   const percentOff = hasDiscount
     ? Math.round(100 - (product.basePriceCents / product.compareAtPriceCents!) * 100)
     : 0;
+
+  // A grid card only has room for a one-click add, not a variant picker —
+  // so quick-add is offered exclusively when there's nothing to choose.
+  // Multi-variant products (most sauna heaters/doors have size or power
+  // options) still route to the PDP to pick a variant, same as before.
+  const singleVariant = product.variants.length === 1 ? product.variants[0] : null;
+  const availableStock = singleVariant?.inventory
+    ? singleVariant.inventory.stockQuantity - singleVariant.inventory.reservedQuantity
+    : 0;
+  const canQuickAdd = !outOfStock && singleVariant != null && availableStock > 0;
+
+  function handleQuickAdd(e: React.MouseEvent) {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!singleVariant) return;
+    addItem({
+      variantId: singleVariant.id,
+      productSlug: product.slug,
+      productTitle: product.title,
+      variantLabel: null,
+      imageUrl: image ?? null,
+      priceCents: singleVariant.priceCents,
+      availableStock,
+    });
+  }
 
   return (
     <Link
@@ -83,6 +112,20 @@ export function ProductCard({ product }: { product: Product }) {
             <span className="text-ink-500">In stock</span>
           )}
         </div>
+
+        {canQuickAdd ? (
+          <button
+            type="button"
+            onClick={handleQuickAdd}
+            className="mt-2 w-full rounded-full border border-cedar-600 py-2 text-xs font-semibold text-cedar-700 transition-colors hover:bg-cedar-600 hover:text-white"
+          >
+            Add to Cart
+          </button>
+        ) : (
+          !outOfStock && (
+            <span className="mt-2 block text-center text-xs font-medium text-ink-500">Select Options</span>
+          )
+        )}
       </div>
     </Link>
   );
