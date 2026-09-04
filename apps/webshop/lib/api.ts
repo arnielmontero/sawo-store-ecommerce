@@ -46,6 +46,9 @@ export interface Product {
   description: string | null;
   basePriceCents: number;
   compareAtPriceCents: number | null;
+  // Null unless admin actually set a sale window — never fabricated
+  // client-side. A Flash Deals countdown only renders when this is present.
+  saleEndsAt: string | null;
   currency: string;
   imageUrl: string | null;
   featuredImageUrl: string | null;

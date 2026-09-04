@@ -3,6 +3,9 @@ import Link from "next/link";
 import { fetchAllProducts, fetchCategoryTree, type Product } from "@/lib/api";
 import { ProductGrid } from "@/components/ProductGrid";
 import { formatCents } from "@/lib/format";
+import { CategoryIconStrip } from "@/components/CategoryIconStrip";
+import { FlashDealsRail } from "@/components/FlashDealsRail";
+import { TrustBadges } from "@/components/TrustBadges";
 
 // The hero picks a random product below — without this, Next's Full Route
 // Cache would render the page once and serve that same static HTML (same
@@ -97,6 +100,12 @@ export default async function HomePage() {
         </section>
       )}
 
+      <CategoryIconStrip categories={categoryPreviews} />
+
+      <FlashDealsRail products={onSale} />
+
+      <TrustBadges />
+
       <section className="mx-auto max-w-[1800px] px-4 py-16 sm:px-6 lg:px-10">
         <h2 className="mb-8 font-serif text-2xl font-semibold text-ink-900">Shop by Category</h2>
         <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-5 xl:grid-cols-6">
@@ -126,18 +135,6 @@ export default async function HomePage() {
           ))}
         </div>
       </section>
-
-      {onSale.length > 0 && (
-        <section className="mx-auto max-w-[1800px] px-4 py-16 sm:px-6 lg:px-10">
-          <div className="mb-8 flex items-center justify-between">
-            <h2 className="font-serif text-2xl font-semibold text-ink-900">On Sale</h2>
-            <Link href="/shop?onSale=1" className="text-sm font-medium text-cedar-600 hover:underline">
-              View all
-            </Link>
-          </div>
-          <ProductGrid products={onSale.slice(0, 8)} />
-        </section>
-      )}
 
       {bestSellers.length > 0 && (
         <section className="mx-auto max-w-[1800px] px-4 py-16 sm:px-6 lg:px-10">

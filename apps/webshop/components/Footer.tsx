@@ -3,6 +3,25 @@ import Link from "next/link";
 export function Footer() {
   return (
     <footer className="mt-20 border-t border-ink-100 bg-white">
+      <div className="mx-auto max-w-[1800px] px-4 pt-12 sm:px-6 lg:px-10">
+        <div className="border-b border-ink-100 pb-10 text-sm leading-relaxed text-ink-500">
+          <h2 className="mb-3 font-serif text-lg font-semibold text-ink-900">Shop Sauna Products Online at SAWO</h2>
+          <p>
+            SAWO carries electric and wood-burning sauna heaters, control panels, frameless and framed glass sauna
+            doors, and accessories including benches, backrests, buckets and ladles, headrests, lighting, and
+            thermometers — everything needed to build or upgrade a home sauna. Every product listed here is sourced
+            directly from SAWO and stocked in the quantities shown; when an item shows as low stock or out of stock,
+            that reflects real inventory, not a placeholder.
+          </p>
+          <p className="mt-3">
+            Placed an order? Use your order reference on the{" "}
+            <Link href="/track" className="text-cedar-600 hover:underline">
+              Track Order
+            </Link>{" "}
+            page any time to see its current status, from order placed through delivery.
+          </p>
+        </div>
+      </div>
       <div className="mx-auto grid max-w-[1800px] grid-cols-1 gap-8 px-4 py-12 sm:grid-cols-3 sm:px-6 lg:px-10">
         <div>
           <span className="font-serif text-xl font-semibold text-ink-900">

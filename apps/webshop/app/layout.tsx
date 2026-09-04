@@ -6,8 +6,8 @@ import { Footer } from "@/components/Footer";
 import { CartDrawer } from "@/components/CartDrawer";
 
 export const metadata: Metadata = {
-  title: "SAWO — Sauna Products",
-  description: "Heaters, stones, benches, and accessories for a proper Nordic sauna.",
+  title: "SAWO Sauna — Heaters, Doors & Accessories",
+  description: "Shop genuine SAWO sauna heaters, doors, benches, and accessories for a proper Nordic sauna.",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
